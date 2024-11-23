@@ -198,7 +198,7 @@ def svd_reco_cuda_perfmeasure(u: np.ndarray, s: np.ndarray, vt: np.ndarray, k: n
         "time_kernel_ms": t_kernel.elapsed_time()*1000,
         "consumed_mem_bandwidth_GB/s": number_of_GB_transferred_total / t_kernel.elapsed_time(),
         "consumed TFLOPs": num_fpo_total / t_kernel.elapsed_time(),
-        "isclose": np.isclose(y_ref, y_ret)
+        "isclose": np.isclose(y_ref, y_ret).all()
     }
 
 if __name__ == "__main__":
