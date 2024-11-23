@@ -53,7 +53,7 @@ def reconstruct_svd_broadcast(u,s,vt,k):
 
     return u[:, :k]@(s[:k].reshape(-1, 1)*vt[:k, :])
 
-@cuda.jit("void(Array(float32, 2, 'C'), Array(float32, 1, 'C'), Array(float32, 2, 'F'), int32, Array(float32, 2, 'C'))")
+@cuda.jit("void(Array(float64, 2, 'C'), Array(float64, 1, 'C'), Array(float64, 2, 'F'), int32, Array(float64, 2, 'C'))")
 def svd_reco_kernel(u, s, vt, k, y):
     """SVD reconstruction for k components using cuda
     
@@ -76,7 +76,7 @@ def svd_reco_kernel(u, s, vt, k, y):
     y[m, n] = element
 
 def get_transfers_fpo_per_thread(k):
-    """ Standard function to estimate number of fp32 transfers and operations per thread
+    """ Standard function to estimate number of data transfers and operations per thread
     """
     
     num_transfers_per_thread = 1 + (4 * k) + 1
@@ -85,7 +85,7 @@ def get_transfers_fpo_per_thread(k):
     return num_transfers_per_thread, num_fpo_per_thread
 
 def svd_reco_cuda(
-    u: np.ndarray, s: np.ndarray, vt: np.ndarray, k: int, block_size: tuple = (32, 32)
+    u: np.ndarray, s: np.ndarray, vt: np.ndarray, k: np.int32, block_size: tuple = (32, 32)
 ) -> np.ndarray:
     """Host function to perform SVD reconstruction using CUDA kernel.
 
@@ -93,7 +93,7 @@ def svd_reco_cuda(
         u (np.ndarray): Left singular vectors, shape (m, n).
         s (np.ndarray): Singular values, shape (n,).
         vt (np.ndarray): Right singular vectors, shape (n, n).
-        k (int): Number of singular components to use in reconstruction.
+        k (int32): Number of singular components to use in reconstruction.
         block_size (tuple(int,int)): Number of threads per block
 
     Returns:
@@ -101,9 +101,9 @@ def svd_reco_cuda(
     """
 
     # convert to correct dtype
-    u = u.astype(np.float32)
-    s = s.astype(np.float32)
-    vt = np.asfortranarray(vt.astype(np.float32)) # convert and make column major
+    u = u.astype(np.float64)
+    s = s.astype(np.float64)
+    vt = np.asfortranarray(vt.astype(np.float64)) # convert and make column major
 
     # Send arrays to gpu
     u = cuda.to_device(u)
@@ -112,7 +112,7 @@ def svd_reco_cuda(
 
     # create array where results are stored. Also pin that array so no data gets moved out of the ram.
     m, n = u.shape[0], vt.shape[1]
-    y = cuda.device_array((m, n), dtype=np.float32)
+    y = cuda.device_array((m, n), dtype=np.float64)
     y_ret = cuda.pinned_array_like(y)
 
     # Define CUDA thread and block dimensions
@@ -121,20 +121,20 @@ def svd_reco_cuda(
     blocks_per_grid = (blocks_per_grid_x, blocks_per_grid_y)
 
     # launch cuda kernel
-    svd_reco_kernel[blocks_per_grid, block_size](u, s, vt, k, y)
+    svd_reco_kernel[blocks_per_grid, block_size](u, s, vt, np.int32(k), y)
 
     y.copy_to_host(y_ret)
 
     return y_ret
 
-def svd_reco_cuda_metrics(u: np.ndarray, s: np.ndarray, vt: np.ndarray, k: int, block_size: tuple):
+def svd_reco_cuda_metrics(u: np.ndarray, s: np.ndarray, vt: np.ndarray, k: np.int32, block_size: tuple):
     """Host function to perform SVD reconstruction using CUDA kernel and doing performance measurements.
 
     Args:
         u (np.ndarray): Left singular vectors, shape (m, n).
         s (np.ndarray): Singular values, shape (n,).
         vt (np.ndarray): Right singular vectors, shape (n, n).
-        k (int): Number of singular components to use in reconstruction.
+        k (int32): Number of singular components to use in reconstruction.
         block_size (tuple(int,int)): Number of threads per block
 
     Returns:
@@ -142,9 +142,9 @@ def svd_reco_cuda_metrics(u: np.ndarray, s: np.ndarray, vt: np.ndarray, k: int, 
     """
 
     # convert to correct dtype
-    u = u.astype(np.float32)
-    s = s.astype(np.float32)
-    vt = vt.astype(np.float32)
+    u = u.astype(np.float64)
+    s = s.astype(np.float64)
+    vt = vt.astype(np.float64)
 
     # reconstruct using reference function
     y_ref = reconstruct_svd_broadcast(u, s, vt, k)
@@ -160,7 +160,7 @@ def svd_reco_cuda_metrics(u: np.ndarray, s: np.ndarray, vt: np.ndarray, k: int, 
 
         # create array where results are stored. Also pin that array so no data gets moved out of the ram.
         m, n = u.shape[0], vt.shape[1]
-        y = cuda.device_array((m, n), dtype=np.float32)
+        y = cuda.device_array((m, n), dtype=np.float64)
         y_ret = cuda.pinned_array_like(y)
 
     # Define CUDA thread and block dimensions
@@ -170,18 +170,18 @@ def svd_reco_cuda_metrics(u: np.ndarray, s: np.ndarray, vt: np.ndarray, k: int, 
 
     with time_region_cuda() as t_kernel:
         # Launch the CUDA kernel
-        svd_reco_kernel[blocks_per_grid, block_size](u, s, vt, k, y)
+        svd_reco_kernel[blocks_per_grid, block_size](u, s, vt, np.int32(k), y)
 
     with time_region_cuda(t_xfer.elapsed_time()) as t_xfer:
         # copy back to host
         y.copy_to_host(y_ret)
     
-    # get number of transfers and number of fp32 operations per thread
+    # get number of transfers and number of fp64 operations per thread
     num_transfers_per_thread, num_fpo_per_thread = get_transfers_fpo_per_thread(k)
 
     # calculate number of transfers in total
     number_of_GB_transferred_total = (
-        1e-9 * 4 * num_transfers_per_thread * y.shape[0] * y.shape[1]
+        1e-9 * 8 * num_transfers_per_thread * y.shape[0] * y.shape[1]
     )
 
     # calculate number of floating point operations
@@ -208,14 +208,10 @@ if __name__ == "__main__":
     # Get all the names of the files
     names = [f[-17:-4] for f in files]
 
+    # random BIG image
     im = np.random.normal(size=(2000, 20000))
     im = im - im.min() / im.max() - im.min()  # normalize image
     u, s, vt = np.linalg.svd(im, full_matrices=False)
 
-    # convert to correct dtype
-    u = u.astype(np.float32)
-    s = s.astype(np.float32)
-    vt = vt.astype(np.float32)
-
     # do a full reconstruction
-    svd_reco_cuda_metrics(u, s, vt, 2000, (256, 256))
+    svd_reco_cuda_metrics(u, s, vt, len(s), (256, 256))
