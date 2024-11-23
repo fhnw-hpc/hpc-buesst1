@@ -43,12 +43,10 @@ class time_region_cuda:
         )
 
 
-@cuda.jit(
-    "void(Array(float32, 2, 'C'), Array(float32, 1, 'C'), Array(float32, 2, 'F'), int32, Array(float32, 2, 'C'))"
-)
+@cuda.jit("void(Array(float32, 2, 'C'), Array(float32, 1, 'C'), Array(float32, 2, 'F'), int32, Array(float32, 2, 'C'))")
 def svd_reco_kernel(u, s, vt, k, y):
     """SVD reconstruction for k components using cuda
-
+    
     Inputs:
     u (m,n): array
     s (n): array (diagonal matrix)
@@ -66,7 +64,6 @@ def svd_reco_kernel(u, s, vt, k, y):
         element += u[m, p] * s[p] * vt[p, n]
 
     y[m, n] = element
-
 
 def calculate(
     u: np.ndarray, s: np.ndarray, vt: np.ndarray, k: int, block_size: tuple = (32, 32)
@@ -122,14 +119,16 @@ def calculate(
         1e-9 * 4 * num_transfers_per_thread * y.shape[0] * y.shape[1]
     )
 
+    # calculate number of floating point operations
+    num_fpo_per_thread = k*2
+    num_fpo_total = 1e-12 * num_fpo_per_thread * y.shape[0] * y.shape[1]
+
     print(f"Cuda transfer overhead: {t_xfer.elapsed_time()*1000} ms")
     print(f"Cuda kernel time: {t_kernel.elapsed_time()*1000} ms")
-    print(
-        f"Consumed memory bandwidth: {number_of_GB_transferred / t_kernel.elapsed_time()} GB/s"
-    )
+    print(f"Consumed memory bandwidth: {number_of_GB_transferred / t_kernel.elapsed_time()} GB/s")
+    print(f"Consumed TFLOPs: {num_fpo_total / t_kernel.elapsed_time()}")
 
     return y_ret
-
 
 if __name__ == "__main__":
     subfolder = "001"
@@ -144,7 +143,7 @@ if __name__ == "__main__":
     # Get all the names of the files
     names = [f[-17:-4] for f in files]
 
-    im = images[0]
+    im = np.random.normal(size=(2000, 20000))
     im = im - im.min() / im.max() - im.min()  # normalize image
     u, s, vt = np.linalg.svd(im, full_matrices=False)
 
