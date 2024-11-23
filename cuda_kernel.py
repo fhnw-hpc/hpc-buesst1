@@ -75,8 +75,8 @@ def get_transfers_and_fpo_per_thread(k):
     """ Standard function to estimate number of data transfers and operations per thread
     """
     
-    num_transfers_per_thread = 1 + (4 * k) + 1
-    num_fpo_per_thread = k*2
+    num_transfers_per_thread = (4 * k) + 1
+    num_fpo_per_thread = k*3
 
     return num_transfers_per_thread, num_fpo_per_thread
 
@@ -180,7 +180,7 @@ def svd_reco_cuda_perfmeasure(
 
     # calculate number of transferred bytes in total
     number_of_GB_transferred_total = (
-        8 * num_transfers_per_thread * y.shape[0] * y.shape[1]
+        4 * num_transfers_per_thread * y.shape[0] * y.shape[1]
     )
 
     # calculate number of floating point operations
@@ -190,6 +190,7 @@ def svd_reco_cuda_perfmeasure(
         "cuda": {
             "time_transfer_ms": t_xfer.elapsed_time() * 1000,
             "time_kernel_ms": t_kernel.elapsed_time() * 1000,
+            "time_reco_ms": (t_xfer.elapsed_time() + t_kernel.elapsed_time()) * 1000,
             "consumed_mem_bandwidth_GB/s": 1e-9
             * (number_of_GB_transferred_total / t_kernel.elapsed_time()),
             "consumed GFLOPs": 1e-9 * (num_fpo_total / t_kernel.elapsed_time()),

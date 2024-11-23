@@ -20,3 +20,5 @@ adni_png
 
 # End of https://www.toptal.com/developers/gitignore/api/jupyternotebooks
 
+__pycache__
+
