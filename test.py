@@ -218,4 +218,4 @@ if __name__ == "__main__":
     vt = vt.astype(np.float32)
 
     # do a full reconstruction
-    svd_reco_cuda_metrics(u, s, vt, 2000)
+    svd_reco_cuda_metrics(u, s, vt, 2000, (256, 256))
