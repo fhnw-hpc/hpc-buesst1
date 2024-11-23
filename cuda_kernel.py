@@ -1,7 +1,6 @@
 import numpy as np
 from numba import cuda
 import time
-import os
 
 class time_region:
     def __init__(self, time_offset=0):
@@ -72,7 +71,7 @@ def svd_reco_kernel(u, s, vt, k, y):
 
     y[m, n] = element
 
-def get_transfers_fpo_per_thread(k):
+def get_transfers_and_fpo_per_thread(k):
     """ Standard function to estimate number of data transfers and operations per thread
     """
     
@@ -124,7 +123,9 @@ def svd_reco_cuda(
 
     return y_ret
 
-def svd_reco_cuda_perfmeasure(u: np.ndarray, s: np.ndarray, vt: np.ndarray, k: np.int32, block_size: tuple):
+def svd_reco_cuda_perfmeasure(
+    u: np.ndarray, s: np.ndarray, vt: np.ndarray, k: np.int32, block_size: tuple
+):
     """Host function to perform SVD reconstruction using CUDA kernel and doing performance measurements.
 
     Args:
@@ -144,7 +145,8 @@ def svd_reco_cuda_perfmeasure(u: np.ndarray, s: np.ndarray, vt: np.ndarray, k: n
     vt = vt.astype(np.float64)
 
     # reconstruct using reference function
-    y_ref = reconstruct_svd_broadcast(u, s, vt, k)
+    with time_region() as t_cpu:
+        y_ref = reconstruct_svd_broadcast(u, s, vt, k)
 
     # make column major
     vt = np.asfortranarray(vt)
@@ -174,22 +176,31 @@ def svd_reco_cuda_perfmeasure(u: np.ndarray, s: np.ndarray, vt: np.ndarray, k: n
         y.copy_to_host(y_ret)
 
     # get number of transfers and number of fp64 operations per thread
-    num_transfers_per_thread, num_fpo_per_thread = get_transfers_fpo_per_thread(k)
+    num_transfers_per_thread, num_fpo_per_thread = get_transfers_and_fpo_per_thread(k)
 
-    # calculate number of transfers in total
+    # calculate number of transferred bytes in total
     number_of_GB_transferred_total = (
-        1e-9 * 8 * num_transfers_per_thread * y.shape[0] * y.shape[1]
+        8 * num_transfers_per_thread * y.shape[0] * y.shape[1]
     )
 
     # calculate number of floating point operations
-    num_fpo_total = 1e-12 * num_fpo_per_thread * y.shape[0] * y.shape[1]
-    
+    num_fpo_total = num_fpo_per_thread * y.shape[0] * y.shape[1]
+
     return {
-        "time_transfer_ms": t_xfer.elapsed_time()*1000,
-        "time_kernel_ms": t_kernel.elapsed_time()*1000,
-        "consumed_mem_bandwidth_GB/s": number_of_GB_transferred_total / t_kernel.elapsed_time(),
-        "consumed TFLOPs": num_fpo_total / t_kernel.elapsed_time(),
-        "isclose": np.isclose(y_ref, y_ret).all()
+        "cuda": {
+            "time_transfer_ms": t_xfer.elapsed_time() * 1000,
+            "time_kernel_ms": t_kernel.elapsed_time() * 1000,
+            "consumed_mem_bandwidth_GB/s": 1e-9
+            * (number_of_GB_transferred_total / t_kernel.elapsed_time()),
+            "consumed GFLOPs": 1e-9 * (num_fpo_total / t_kernel.elapsed_time()),
+        },
+        "cpu": {
+            "time_reco_ms": t_cpu.elapsed_time() * 1000,
+            "consumed_mem_bandwidth_GB/s": 1e-9
+            * (number_of_GB_transferred_total / t_cpu.elapsed_time()) if t_cpu.elapsed_time() > 0 else np.inf,
+            "consumed GFLOPs": 1e-9 * (num_fpo_total / t_cpu.elapsed_time()) if t_cpu.elapsed_time() > 0 else np.inf,
+        },
+        "cpu_cuda_same": bool(np.isclose(y_ref, y_ret).all()),
     }
 
 # if this script is called directly (eg profiling) -> perform random big reconstruction
@@ -210,4 +221,4 @@ if __name__ == "__main__":
     # for reference -> calculate on cpu
     result_ref = reconstruct_svd_broadcast(u, s, vt, len(s))
 
-    print("cuda and cpu have resulted on the same result: ", np.isclose(result, result_ref))
+    print("cuda and cpu have resulted on the same result: ", bool(np.isclose(result, result_ref).all()))
