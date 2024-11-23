@@ -220,4 +220,6 @@ if __name__ == "__main__":
     u, s, vt = np.linalg.svd(im, full_matrices=False)
 
     # do a full reconstruction
-    svd_reco_cuda_perfmeasure(u, s, vt, len(s), (32, 32))
+    result = svd_reco_cuda_perfmeasure(u, s, vt, len(s), (32, 32))
+
+    print(result)
