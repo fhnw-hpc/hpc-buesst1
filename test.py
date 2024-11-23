@@ -127,7 +127,7 @@ def svd_reco_cuda(
 
     return y_ret
 
-def svd_reco_cuda_metrics(u: np.ndarray, s: np.ndarray, vt: np.ndarray, k: np.int32, block_size: tuple):
+def svd_reco_cuda_perfmeasure(u: np.ndarray, s: np.ndarray, vt: np.ndarray, k: np.int32, block_size: tuple):
     """Host function to perform SVD reconstruction using CUDA kernel and doing performance measurements.
 
     Args:
@@ -152,6 +152,9 @@ def svd_reco_cuda_metrics(u: np.ndarray, s: np.ndarray, vt: np.ndarray, k: np.in
     # make column major
     vt = np.asfortranarray(vt)
 
+    # start profiling
+    cuda.profile_start()
+
     with time_region_cuda() as t_xfer:
         # Send arrays to gpu
         u = cuda.to_device(u)
@@ -175,6 +178,9 @@ def svd_reco_cuda_metrics(u: np.ndarray, s: np.ndarray, vt: np.ndarray, k: np.in
     with time_region_cuda(t_xfer.elapsed_time()) as t_xfer:
         # copy back to host
         y.copy_to_host(y_ret)
+
+    # stop profiling
+    cuda.profile_stop()
     
     # get number of transfers and number of fp64 operations per thread
     num_transfers_per_thread, num_fpo_per_thread = get_transfers_fpo_per_thread(k)
@@ -214,4 +220,4 @@ if __name__ == "__main__":
     u, s, vt = np.linalg.svd(im, full_matrices=False)
 
     # do a full reconstruction
-    svd_reco_cuda_metrics(u, s, vt, len(s), (32, 32))
+    svd_reco_cuda_perfmeasure(u, s, vt, len(s), (32, 32))
