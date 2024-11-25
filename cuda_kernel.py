@@ -34,6 +34,30 @@ class time_region_cuda:
     def elapsed_time(self):
         return self._time_offset + 1e-3*cuda.event_elapsed_time(self._t_start, self._t_end)
 
+def random_svd(shape):
+    """
+    Generates random matrices U, S, and V^T for SVD decomposition.
+
+    Parameters:
+    - shape: tuple, the shape of the original matrix (m, n)
+
+    Returns:
+    - U: np.ndarray, matrix of shape (m, m)
+    - S: np.ndarray, singular values (min(m, n),)
+    - Vt: np.ndarray, matrix of shape (n, n)
+    """
+    m, n = shape
+    k = min(m, n)  # Number of singular values
+
+    # Generate random matrices U and V
+    U  = np.random.randn(m, m)  # QR decomposition ensures orthogonality
+    Vt = np.random.randn(n, n)
+
+    # Generate random singular values in descending order
+    S = np.sort(np.random.rand(k))[::-1]
+
+    return U, S, Vt
+
 def reconstruct_svd_broadcast(u,s,vt,k):
     """SVD reconstruction for k components using broadcast
     
@@ -206,20 +230,32 @@ def svd_reco_cuda_perfmeasure(
 
 # if this script is called directly (eg profiling) -> perform random big reconstruction
 if __name__ == "__main__":
-    # random BIG image
-    im = np.random.normal(size=(5000, 5000))
-    im = im - im.min() / im.max() - im.min()  # normalize image
-    u, s, vt = np.linalg.svd(im, full_matrices=False)
+    # create random matrices to reconstruct
+    u, s, vt = random_svd((20000, 20000))
 
     # block size
     block_size = (32, 32)
 
     assert block_size[0]*block_size[1] <= 1024, "a block is now allowed ha have more threads than 1024"
 
+    print("start cuda reconstruction")
+
+    cuda_start = time.time()
+
     # do a full reconstruction
     result = svd_reco_cuda(u, s, vt, len(s), block_size)
+
+    cuda_end = time.time()
+
+    print("cuda reconstruction finished -> start cpu reconstruction")
+
+    cpu_start = time.time()
 
     # for reference -> calculate on cpu
     result_ref = reconstruct_svd_broadcast(u, s, vt, len(s))
 
-    print("cuda and cpu have resulted on the same result: ", bool(np.isclose(result, result_ref).all()))
+    cpu_end = time.time()
+
+    print("cpu reconstruction finished -> cuda and cpu reco are the same: ", bool(np.isclose(result, result_ref).all()))
+    print(f"total time cuda: {(cuda_end - cuda_start)*1000} ms")
+    print(f"total time cpu: {(cpu_end - cpu_start)*1000} ms")
