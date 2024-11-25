@@ -306,7 +306,7 @@ def svd_reco_cuda_perfmeasure(
 # if this script is called directly (eg profiling) -> perform random big reconstruction
 if __name__ == "__main__":
     # create random matrices to reconstruct
-    u, s, vt = random_svd((20000, 20000))
+    u, s, vt = random_svd((10000, 10000))
 
     # block size
     block_size = (32, 32)
