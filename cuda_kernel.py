@@ -207,7 +207,7 @@ def svd_reco_cuda_perfmeasure(
 # if this script is called directly (eg profiling) -> perform random big reconstruction
 if __name__ == "__main__":
     # random BIG image
-    im = np.random.normal(size=(2000, 20000))
+    im = np.random.normal(size=(5000, 5000))
     im = im - im.min() / im.max() - im.min()  # normalize image
     u, s, vt = np.linalg.svd(im, full_matrices=False)
 
