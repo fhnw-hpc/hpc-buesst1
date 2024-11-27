@@ -313,7 +313,7 @@ if __name__ == "__main__":
     u, s, vt = random_svd((10000, 10000))
 
     # block size
-    block_size = (32, 32)
+    block_size = (8, 16)
 
     assert (
         block_size[0] * block_size[1] <= 1024
