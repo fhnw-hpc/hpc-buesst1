@@ -2,7 +2,7 @@ import numpy as np
 from numba import cuda, float32, float64
 import time
 
-TILE_SIZE = 128
+TILE_SIZE = 5
 
 class time_region:
     def __init__(self, time_offset=0):
@@ -135,8 +135,6 @@ def svd_reco_kernel_fp32(u, s, vt, k, y):
 @cuda.jit(
     "void(Array(float64, 2, 'C'), Array(float64, 1, 'C'), Array(float64, 2, 'C'), int32, Array(float64, 2, 'C'))",
     fastmath=True,
-    debug=True,
-    opt=False
 )
 def svd_reco_kernel_fp64_sharedmem(u, s, vt, k, y):
     """SVD reconstruction for k components using cuda. FP64 operation (slower but more accurate than FP64)
@@ -151,10 +149,10 @@ def svd_reco_kernel_fp64_sharedmem(u, s, vt, k, y):
     m, n = cuda.grid(2)
 
     # init shared array
-    s_s = cuda.shared.array(shape=(128,), dtype=float64)
+    s_s = cuda.shared.array(shape=TILE_SIZE, dtype=float64)
     
     # calculate number of min tiles required
-    num_tiles = (k // TILE_SIZE) + 1
+    num_tiles = (k + TILE_SIZE - 1) // TILE_SIZE
 
     # calculate thread id within block
     threadID = cuda.threadIdx.x + cuda.blockDim.x * cuda.threadIdx.y
@@ -175,19 +173,14 @@ def svd_reco_kernel_fp64_sharedmem(u, s, vt, k, y):
         cuda.syncthreads()
 
         # only process if thread has a global index within final matrix
-        if m < u.shape[0] or n < vt.shape[1]:
+        if m < u.shape[0] and n < vt.shape[1]:
             # loop over tile
             for p in range(TILE_SIZE):
                 # only add if element < k
                 if tile_nr*TILE_SIZE+p < k:
                     element += u[m, tile_nr*TILE_SIZE+p] * s_s[p] * vt[tile_nr*TILE_SIZE+p, n]
 
-                    if n == 0 and m == 0 and tile_nr == 1:
-                        print("p: ", p)
-                        print("u: ", u[m, tile_nr*TILE_SIZE+p])
-                        print("s_s: ", s_s[p])
-                        print("vt: ", vt[tile_nr*TILE_SIZE+p, n])
-                        
+        # wait for all threads to finish dot product
         cuda.syncthreads()
 
     y[m, n] = element
@@ -373,7 +366,7 @@ def svd_reco_cuda_perfmeasure(
 # if this script is called directly (eg profiling) -> perform random big reconstruction
 if __name__ == "__main__":
     # create random matrices to reconstruct
-    u, s, vt = random_svd((130, 130))
+    u, s, vt = random_svd((6, 6))
 
     print("u original:")
     print(u)
@@ -385,7 +378,7 @@ if __name__ == "__main__":
     print(vt)
 
     # block size
-    block_size = (8, 16)
+    block_size = (1, 5)
 
     assert (
         block_size[0] * block_size[1] <= 1024
@@ -411,6 +404,12 @@ if __name__ == "__main__":
     cpu_start = time.time()
     result_cpu = reconstruct_svd_broadcast(u, s, vt, len(s))
     cpu_end = time.time()
+
+    print("cpu result:")
+    print(result_cpu)
+
+    print("gpu resuslt:")
+    print(result64)
 
     print(
         "cuda in fp64 mode and cpu same: ",
