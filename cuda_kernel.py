@@ -1,5 +1,5 @@
 import numpy as np
-from numba import cuda
+from numba import cuda, float32, float64
 import time
 
 
@@ -98,7 +98,7 @@ def svd_reco_kernel_fp64(u, s, vt, k, y):
     if m >= u.shape[0] or n >= vt.shape[1]:
         return
 
-    element = 0.0
+    element = float64(0)
     for p in range(k):
         element += u[m, p] * s[p] * vt[p, n]
 
@@ -123,7 +123,7 @@ def svd_reco_kernel_fp32(u, s, vt, k, y):
     if m >= u.shape[0] or n >= vt.shape[1]:
         return
 
-    element = 0.0
+    element = float32(0)
     for p in range(k):
         element += u[m, p] * s[p] * vt[p, n]
 
