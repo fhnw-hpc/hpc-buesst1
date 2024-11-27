@@ -81,7 +81,8 @@ def reconstruct_svd_broadcast(u, s, vt, k):
 
 
 @cuda.jit(
-    "void(Array(float64, 2, 'C'), Array(float64, 1, 'C'), Array(float64, 2, 'C'), int32, Array(float64, 2, 'C'))"
+    "void(Array(float64, 2, 'C'), Array(float64, 1, 'C'), Array(float64, 2, 'C'), int32, Array(float64, 2, 'C'))",
+    fastmath=True,
 )
 def svd_reco_kernel_fp64(u, s, vt, k, y):
     """SVD reconstruction for k components using cuda. FP64 operation (slower but more accurate than FP64)
@@ -106,7 +107,8 @@ def svd_reco_kernel_fp64(u, s, vt, k, y):
 
 
 @cuda.jit(
-    "void(Array(float32, 2, 'C'), Array(float32, 1, 'C'), Array(float32, 2, 'C'), int32, Array(float32, 2, 'C'))"
+    "void(Array(float32, 2, 'C'), Array(float32, 1, 'C'), Array(float32, 2, 'C'), int32, Array(float32, 2, 'C'))",
+    fastmath=True,
 )
 def svd_reco_kernel_fp32(u, s, vt, k, y):
     """SVD reconstruction for k components using cuda. FP32 operation (faster but at the cost of lower precision)
@@ -172,9 +174,9 @@ def svd_reco_cuda(
 
     print("reco in fp", 64 if fp64 else 32, " mode")
 
-    u = np.ascontiguousarray(u) # make row major 
-    s = np.ascontiguousarray(s) # make row major 
-    vt = np.ascontiguousarray(vt) # make row major 
+    u = np.ascontiguousarray(u)  # make row major
+    s = np.ascontiguousarray(s)  # make row major
+    vt = np.ascontiguousarray(vt)  # make row major
 
     # Send arrays to gpu
     u = cuda.to_device(u)
@@ -231,9 +233,9 @@ def svd_reco_cuda_perfmeasure(
 
     print("reco in fp", 64 if fp64 else 32, " mode")
 
-    u = np.ascontiguousarray(u) # make row major 
-    s = np.ascontiguousarray(s) # make row major 
-    vt = np.ascontiguousarray(vt) # make row major 
+    u = np.ascontiguousarray(u)  # make row major
+    s = np.ascontiguousarray(s)  # make row major
+    vt = np.ascontiguousarray(vt)  # make row major
 
     # reconstruct using reference function
     with time_region() as t_cpu:
@@ -247,7 +249,9 @@ def svd_reco_cuda_perfmeasure(
 
         # create array where results are stored. Also pin that array so no data gets moved out of the ram.
         m, n = u.shape[0], vt.shape[1]
-        y = cuda.device_array((m, n), dtype=np.float64 if fp64 else np.float32, order="C")
+        y = cuda.device_array(
+            (m, n), dtype=np.float64 if fp64 else np.float32, order="C"
+        )
         y_ret = cuda.pinned_array_like(y)
 
     # Define CUDA thread and block dimensions
