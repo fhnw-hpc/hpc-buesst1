@@ -2,6 +2,8 @@ import numpy as np
 from numba import cuda, float32, float64
 import time
 
+TILE_SIZE = 128
+
 class time_region:
     def __init__(self, time_offset=0):
         self._time_offset = time_offset
@@ -131,10 +133,12 @@ def svd_reco_kernel_fp32(u, s, vt, k, y):
     y[m, n] = element
 
 @cuda.jit(
-    "void(Array(float64, 2, 'C'), Array(float64, 1, 'C'), Array(float64, 2, 'C'), int32, Array(float64, 2, 'C'), int32)",
+    "void(Array(float64, 2, 'C'), Array(float64, 1, 'C'), Array(float64, 2, 'C'), int32, Array(float64, 2, 'C'))",
     fastmath=True,
+    debug=True,
+    opt=False
 )
-def svd_reco_kernel_fp64_sharedmem(u, s, vt, k, y, tile_size):
+def svd_reco_kernel_fp64_sharedmem(u, s, vt, k, y):
     """SVD reconstruction for k components using cuda. FP64 operation (slower but more accurate than FP64)
 
     Inputs:
@@ -143,18 +147,14 @@ def svd_reco_kernel_fp64_sharedmem(u, s, vt, k, y, tile_size):
     vt (n,n): array
     k int: number of reconstructed singular components
     y (m,n): output array
-    tile_size int: size of a tile
     """
     m, n = cuda.grid(2)
 
     # init shared array
-    s_s = cuda.shared.array(shape=0, dtype=float64)
-
-    if m >= u.shape[0] or n >= vt.shape[1]:
-        return
+    s_s = cuda.shared.array(shape=(128,), dtype=float64)
     
     # calculate number of min tiles required
-    num_tiles = (k // tile_size) + 1
+    num_tiles = (k // TILE_SIZE) + 1
 
     # calculate thread id within block
     threadID = cuda.threadIdx.x + cuda.blockDim.x * cuda.threadIdx.y
@@ -164,21 +164,30 @@ def svd_reco_kernel_fp64_sharedmem(u, s, vt, k, y, tile_size):
 
     # iterate over tiles
     for tile_nr in range(num_tiles):
-        if (tile_nr*tile_size + threadID) < k:
-            s_s[threadID] = s[tile_nr*tile_size + threadID]
-        else:
-            s_s[threadID] = float64(0.0)
+        # only copy if threadID is smaller than TILE_SIZE
+        if threadID < TILE_SIZE:
+            if (tile_nr*TILE_SIZE + threadID) < k:
+                s_s[threadID] = s[tile_nr*TILE_SIZE + threadID]
+            else:
+                s_s[threadID] = float64(0.0)
 
+        # wait for all threads to finish the copy process
         cuda.syncthreads()
 
-        if (tile_nr+1)*tile_size < k:
-            for p in range(tile_size):
-                element += u[m, tile_nr*tile_size+p] * s[p] * vt[tile_nr*tile_size+p, n]
+        # only process if thread has a global index within final matrix
+        if m < u.shape[0] or n < vt.shape[1]:
+            # loop over tile
+            for p in range(TILE_SIZE):
+                # only add if element < k
+                if tile_nr*TILE_SIZE+p < k:
+                    element += u[m, tile_nr*TILE_SIZE+p] * s_s[p] * vt[tile_nr*TILE_SIZE+p, n]
 
-        else:
-            for p in range(k - tile_nr*tile_size):
-                element += u[m, tile_nr*tile_size+p] * s[p] * vt[tile_nr*tile_size+p, n]
- 
+                    if n == 0 and m == 0 and tile_nr == 1:
+                        print("p: ", p)
+                        print("u: ", u[m, tile_nr*TILE_SIZE+p])
+                        print("s_s: ", s_s[p])
+                        print("vt: ", vt[tile_nr*TILE_SIZE+p, n])
+                        
         cuda.syncthreads()
 
     y[m, n] = element
@@ -247,7 +256,8 @@ def svd_reco_cuda(
 
     # launch cuda kernel in fp64 mode
     if fp64:
-        svd_reco_kernel_fp64_sharedmem[blocks_per_grid, block_size, 0, 8*8](u, s, vt, np.int32(k), y, 8)
+        assert block_size[0]*block_size[1]== TILE_SIZE #at the moment number of threads per block must be equal to tile size
+        svd_reco_kernel_fp64_sharedmem[blocks_per_grid, block_size](u, s, vt, np.int32(k), y)
 
     else:  # fp32 mode
         svd_reco_kernel_fp32[blocks_per_grid, block_size](u, s, vt, np.int32(k), y)
@@ -363,7 +373,16 @@ def svd_reco_cuda_perfmeasure(
 # if this script is called directly (eg profiling) -> perform random big reconstruction
 if __name__ == "__main__":
     # create random matrices to reconstruct
-    u, s, vt = random_svd((20, 20))
+    u, s, vt = random_svd((130, 130))
+
+    print("u original:")
+    print(u)
+
+    print("s original:")
+    print(s)
+
+    print("vt original:")
+    print(vt)
 
     # block size
     block_size = (8, 16)
