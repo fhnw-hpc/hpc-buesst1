@@ -183,6 +183,8 @@ def svd_reco_kernel_fp64_sharedmem(u, s, vt, k, y):
         # wait for all threads to finish dot product
         cuda.syncthreads()
 
+    print("row: ", m, "col: ", n, "value: ", element)
+
     y[m, n] = element
 
 
@@ -390,15 +392,15 @@ if __name__ == "__main__":
     cuda64_end = time.time()
 
     # do a full reconstruction in fp32 mode
-    cuda32_start = time.time()
-    result32 = svd_reco_cuda(
-        u.astype(np.float32),
-        s.astype(np.float32),
-        vt.astype(np.float32),
-        len(s),
-        block_size,
-    )
-    cuda32_end = time.time()
+    #cuda32_start = time.time()
+    #result32 = svd_reco_cuda(
+    #    u.astype(np.float32),
+    #    s.astype(np.float32),
+    #    vt.astype(np.float32),
+    #    len(s),
+    #    block_size,
+    #)
+    #cuda32_end = time.time()
 
     # for reference -> calculate on cpu
     cpu_start = time.time()
@@ -415,10 +417,10 @@ if __name__ == "__main__":
         "cuda in fp64 mode and cpu same: ",
         bool(np.isclose(result64, result_cpu).all()),
     )
-    print(
-        "cuda in fp32 mode and cpu same: ",
-        bool(np.isclose(result32, result_cpu).all()),
-    )
+    #print(
+    #    "cuda in fp32 mode and cpu same: ",
+    #    bool(np.isclose(result32, result_cpu).all()),
+    #)
     print(f"total time cuda in fp64 mode: {(cuda64_end - cuda64_start)*1000} ms")
-    print(f"total time cuda in fp32 mode: {(cuda32_end - cuda32_start)*1000} ms")
+    #print(f"total time cuda in fp32 mode: {(cuda32_end - cuda32_start)*1000} ms")
     print(f"total time cpu: {(cpu_end - cpu_start)*1000} ms")
