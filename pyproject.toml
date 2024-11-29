@@ -17,6 +17,7 @@ pandas = "^2.2.3"
 seaborn = "^0.13.2"
 black = "^24.10.0"
 tqdm = "^4.67.0"
+nvidia-nvtx-cu12 = "^12.6.77"
 
 
 [build-system]

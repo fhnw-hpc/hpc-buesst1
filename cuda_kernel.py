@@ -1,8 +1,10 @@
 import numpy as np
 from numba import cuda, float32, float64
 import time
+from nvidia import nvtx
 
 TILE_SIZE = 128
+
 
 class time_region:
     def __init__(self, time_offset=0):
@@ -132,6 +134,7 @@ def svd_reco_kernel_fp32(u, s, vt, k, y):
 
     y[m, n] = element
 
+
 @cuda.jit(
     "void(Array(float64, 2, 'C'), Array(float64, 1, 'C'), Array(float64, 2, 'C'), int32, Array(float64, 2, 'C'))",
     fastmath=True,
@@ -150,7 +153,7 @@ def svd_reco_kernel_fp64_sharedmem(u, s, vt, k, y):
 
     # init shared array
     s_s = cuda.shared.array(shape=TILE_SIZE, dtype=float64)
-    
+
     # calculate number of min tiles required
     num_tiles = (k + TILE_SIZE - 1) // TILE_SIZE
 
@@ -164,8 +167,8 @@ def svd_reco_kernel_fp64_sharedmem(u, s, vt, k, y):
     for tile_nr in range(num_tiles):
         # only copy if threadID is smaller than TILE_SIZE
         if threadID < TILE_SIZE:
-            if (tile_nr*TILE_SIZE + threadID) < k:
-                s_s[threadID] = s[tile_nr*TILE_SIZE + threadID]
+            if (tile_nr * TILE_SIZE + threadID) < k:
+                s_s[threadID] = s[tile_nr * TILE_SIZE + threadID]
             else:
                 s_s[threadID] = float64(0)
 
@@ -177,8 +180,12 @@ def svd_reco_kernel_fp64_sharedmem(u, s, vt, k, y):
             # loop over tile
             for p in range(TILE_SIZE):
                 # only add if element < k
-                if tile_nr*TILE_SIZE+p < k:
-                    element += u[m, tile_nr*TILE_SIZE+p] * s_s[p] * vt[tile_nr*TILE_SIZE+p, n]
+                if tile_nr * TILE_SIZE + p < k:
+                    element += (
+                        u[m, tile_nr * TILE_SIZE + p]
+                        * s_s[p]
+                        * vt[tile_nr * TILE_SIZE + p, n]
+                    )
 
         # wait for all threads to finish dot product
         cuda.syncthreads()
@@ -186,6 +193,7 @@ def svd_reco_kernel_fp64_sharedmem(u, s, vt, k, y):
     # only write to global memory if n and m are in range
     if m < y.shape[0] and n < y.shape[1]:
         y[m, n] = element
+
 
 @cuda.jit(
     "void(Array(float32, 2, 'C'), Array(float32, 1, 'C'), Array(float32, 2, 'C'), int32, Array(float32, 2, 'C'))",
@@ -205,7 +213,7 @@ def svd_reco_kernel_fp32_sharedmem(u, s, vt, k, y):
 
     # init shared array
     s_s = cuda.shared.array(shape=TILE_SIZE, dtype=float32)
-    
+
     # calculate number of min tiles required
     num_tiles = (k + TILE_SIZE - 1) // TILE_SIZE
 
@@ -219,8 +227,8 @@ def svd_reco_kernel_fp32_sharedmem(u, s, vt, k, y):
     for tile_nr in range(num_tiles):
         # only copy if threadID is smaller than TILE_SIZE
         if threadID < TILE_SIZE:
-            if (tile_nr*TILE_SIZE + threadID) < k:
-                s_s[threadID] = s[tile_nr*TILE_SIZE + threadID]
+            if (tile_nr * TILE_SIZE + threadID) < k:
+                s_s[threadID] = s[tile_nr * TILE_SIZE + threadID]
             else:
                 s_s[threadID] = float32(0)
 
@@ -232,8 +240,12 @@ def svd_reco_kernel_fp32_sharedmem(u, s, vt, k, y):
             # loop over tile
             for p in range(TILE_SIZE):
                 # only add if element < k
-                if tile_nr*TILE_SIZE+p < k:
-                    element += u[m, tile_nr*TILE_SIZE+p] * s_s[p] * vt[tile_nr*TILE_SIZE+p, n]
+                if tile_nr * TILE_SIZE + p < k:
+                    element += (
+                        u[m, tile_nr * TILE_SIZE + p]
+                        * s_s[p]
+                        * vt[tile_nr * TILE_SIZE + p, n]
+                    )
 
         # wait for all threads to finish dot product
         cuda.syncthreads()
@@ -305,14 +317,20 @@ def svd_reco_cuda(
     blocks_per_grid = (blocks_per_grid_x, blocks_per_grid_y)
 
     # because of tiling -> num threads must be >= tile size because otherwise not all elements will be loaded
-    assert block_size[0]*block_size[1] >= TILE_SIZE, "number of threads must be bigger than tile size"
+    assert (
+        block_size[0] * block_size[1] >= TILE_SIZE
+    ), "number of threads must be bigger than tile size"
 
     # launch cuda kernel in fp64 mode
     if fp64:
-        svd_reco_kernel_fp64_sharedmem[blocks_per_grid, block_size](u, s, vt, np.int32(k), y)
+        svd_reco_kernel_fp64_sharedmem[blocks_per_grid, block_size](
+            u, s, vt, np.int32(k), y
+        )
 
     else:  # fp32 mode
-        svd_reco_kernel_fp32_sharedmem[blocks_per_grid, block_size](u, s, vt, np.int32(k), y)
+        svd_reco_kernel_fp32_sharedmem[blocks_per_grid, block_size](
+            u, s, vt, np.int32(k), y
+        )
 
     y.copy_to_host(y_ret)
 
