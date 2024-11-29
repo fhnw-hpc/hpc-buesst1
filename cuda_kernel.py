@@ -2,7 +2,7 @@ import numpy as np
 from numba import cuda, float32, float64
 import time
 
-TILE_SIZE = 5
+TILE_SIZE = 128
 
 class time_region:
     def __init__(self, time_offset=0):
@@ -167,7 +167,7 @@ def svd_reco_kernel_fp64_sharedmem(u, s, vt, k, y):
             if (tile_nr*TILE_SIZE + threadID) < k:
                 s_s[threadID] = s[tile_nr*TILE_SIZE + threadID]
             else:
-                s_s[threadID] = float64(0.0)
+                s_s[threadID] = float64(0)
 
         # wait for all threads to finish the copy process
         cuda.syncthreads()
@@ -183,9 +183,64 @@ def svd_reco_kernel_fp64_sharedmem(u, s, vt, k, y):
         # wait for all threads to finish dot product
         cuda.syncthreads()
 
-    print("row: ", m, "col: ", n, "value: ", element)
+    # only write to global memory if n and m are in range
+    if m < y.shape[0] and n < y.shape[1]:
+        y[m, n] = element
 
-    y[m, n] = element
+@cuda.jit(
+    "void(Array(float32, 2, 'C'), Array(float32, 1, 'C'), Array(float32, 2, 'C'), int32, Array(float32, 2, 'C'))",
+    fastmath=True,
+)
+def svd_reco_kernel_fp32_sharedmem(u, s, vt, k, y):
+    """SVD reconstruction for k components using cuda. FP64 operation (slower but more accurate than FP64)
+
+    Inputs:
+    u (m,n): array
+    s (n): array (diagonal matrix)
+    vt (n,n): array
+    k int: number of reconstructed singular components
+    y (m,n): output array
+    """
+    m, n = cuda.grid(2)
+
+    # init shared array
+    s_s = cuda.shared.array(shape=TILE_SIZE, dtype=float32)
+    
+    # calculate number of min tiles required
+    num_tiles = (k + TILE_SIZE - 1) // TILE_SIZE
+
+    # calculate thread id within block
+    threadID = cuda.threadIdx.x + cuda.blockDim.x * cuda.threadIdx.y
+
+    # element of final matrix will be stored here
+    element = float32(0)
+
+    # iterate over tiles
+    for tile_nr in range(num_tiles):
+        # only copy if threadID is smaller than TILE_SIZE
+        if threadID < TILE_SIZE:
+            if (tile_nr*TILE_SIZE + threadID) < k:
+                s_s[threadID] = s[tile_nr*TILE_SIZE + threadID]
+            else:
+                s_s[threadID] = float32(0)
+
+        # wait for all threads to finish the copy process
+        cuda.syncthreads()
+
+        # only process if thread has a global index within final matrix
+        if m < u.shape[0] and n < vt.shape[1]:
+            # loop over tile
+            for p in range(TILE_SIZE):
+                # only add if element < k
+                if tile_nr*TILE_SIZE+p < k:
+                    element += u[m, tile_nr*TILE_SIZE+p] * s_s[p] * vt[tile_nr*TILE_SIZE+p, n]
+
+        # wait for all threads to finish dot product
+        cuda.syncthreads()
+
+    # only write to global memory if n and m are in range
+    if m < y.shape[0] and n < y.shape[1]:
+        y[m, n] = element
 
 
 def get_transfers_and_fpo_per_thread(k):
@@ -249,13 +304,15 @@ def svd_reco_cuda(
     blocks_per_grid_y = (n + block_size[1] - 1) // block_size[1]
     blocks_per_grid = (blocks_per_grid_x, blocks_per_grid_y)
 
+    # because of tiling -> num threads must be >= tile size because otherwise not all elements will be loaded
+    assert block_size[0]*block_size[1] >= TILE_SIZE, "number of threads must be bigger than tile size"
+
     # launch cuda kernel in fp64 mode
     if fp64:
-        assert block_size[0]*block_size[1]== TILE_SIZE #at the moment number of threads per block must be equal to tile size
         svd_reco_kernel_fp64_sharedmem[blocks_per_grid, block_size](u, s, vt, np.int32(k), y)
 
     else:  # fp32 mode
-        svd_reco_kernel_fp32[blocks_per_grid, block_size](u, s, vt, np.int32(k), y)
+        svd_reco_kernel_fp32_sharedmem[blocks_per_grid, block_size](u, s, vt, np.int32(k), y)
 
     y.copy_to_host(y_ret)
 
@@ -368,19 +425,10 @@ def svd_reco_cuda_perfmeasure(
 # if this script is called directly (eg profiling) -> perform random big reconstruction
 if __name__ == "__main__":
     # create random matrices to reconstruct
-    u, s, vt = random_svd((6, 6))
-
-    print("u original:")
-    print(u)
-
-    print("s original:")
-    print(s)
-
-    print("vt original:")
-    print(vt)
+    u, s, vt = random_svd((10000, 10000))
 
     # block size
-    block_size = (1, 5)
+    block_size = (8, 16)
 
     assert (
         block_size[0] * block_size[1] <= 1024
@@ -392,35 +440,29 @@ if __name__ == "__main__":
     cuda64_end = time.time()
 
     # do a full reconstruction in fp32 mode
-    #cuda32_start = time.time()
-    #result32 = svd_reco_cuda(
-    #    u.astype(np.float32),
-    #    s.astype(np.float32),
-    #    vt.astype(np.float32),
-    #    len(s),
-    #    block_size,
-    #)
-    #cuda32_end = time.time()
+    cuda32_start = time.time()
+    result32 = svd_reco_cuda(
+        u.astype(np.float32),
+        s.astype(np.float32),
+        vt.astype(np.float32),
+        len(s),
+        block_size,
+    )
+    cuda32_end = time.time()
 
     # for reference -> calculate on cpu
     cpu_start = time.time()
     result_cpu = reconstruct_svd_broadcast(u, s, vt, len(s))
     cpu_end = time.time()
 
-    print("cpu result:")
-    print(result_cpu)
-
-    print("gpu resuslt:")
-    print(result64)
-
     print(
         "cuda in fp64 mode and cpu same: ",
         bool(np.isclose(result64, result_cpu).all()),
     )
-    #print(
-    #    "cuda in fp32 mode and cpu same: ",
-    #    bool(np.isclose(result32, result_cpu).all()),
-    #)
+    print(
+        "cuda in fp32 mode and cpu same: ",
+        bool(np.isclose(result32, result_cpu).all()),
+    )
     print(f"total time cuda in fp64 mode: {(cuda64_end - cuda64_start)*1000} ms")
-    #print(f"total time cuda in fp32 mode: {(cuda32_end - cuda32_start)*1000} ms")
+    print(f"total time cuda in fp32 mode: {(cuda32_end - cuda32_start)*1000} ms")
     print(f"total time cpu: {(cpu_end - cpu_start)*1000} ms")
