@@ -122,30 +122,54 @@ def compare_matrices(matrix1: np.ndarray, matrix2: np.ndarray):
 
 
 def compare_kernels(input: tuple, reco_func1: callable, reco_func2: callable):
-    """ """
+    """
+    Compares the results and timings of two reconstruction functions using the same input data.
 
+    Args:
+        input (tuple): Input data for the reconstruction functions, typically (u, s, vt, k),
+            where `u` is the left singular matrix, `s` is the singular values,
+            `vt` is the right singular matrix, and `k` is the number of singular components to use.
+        reco_func1 (callable): The first reconstruction function to evaluate.
+        reco_func2 (callable): The second reconstruction function to evaluate.
+
+    Returns:
+        bool: True if the outputs of both functions are identical within a tolerance, otherwise False.
+        pd.DataFrame: A DataFrame containing the timing comparisons of the two functions for different operations.
+    """
+
+    # Execute the first reconstruction function
     result_func1 = reco_func1(*input)
     result_func1, timings_func1 = (
         result_func1
         if isinstance(result_func1, tuple)
-        else (result_func1, {})  # disassembe if also timings returned
+        else (result_func1, {})  # Handle case where timings are not returned
     )
 
+    # Execute the second reconstruction function
     result_func2 = reco_func2(*input)
     result_func2, timings_func2 = (
         result_func2
         if isinstance(result_func2, tuple)
-        else (result_func2, {})  # disassembe if also timings returned
+        else (result_func2, {})  # Handle case where timings are not returned
     )
 
     def transform(df):
+        """
+        Transforms a DataFrame by grouping actions and restructuring columns.
+
+        Args:
+            df (pd.DataFrame): Input DataFrame containing timing information.
+
+        Returns:
+            pd.DataFrame: Transformed DataFrame with hierarchical columns.
+        """
         action = df.action.values[0]
         df = df.drop(columns=["action"])
         df.columns = pd.MultiIndex.from_product([[action], df.columns])
 
         return df
 
-    # create timings table
+    # Create a DataFrame to compare timings between the two functions
     timings_ds = pd.concat(
         [
             transform(df).reset_index(drop=True)
@@ -158,6 +182,7 @@ def compare_kernels(input: tuple, reco_func1: callable, reco_func2: callable):
         axis=1,
     )
 
+    # Compare the matrices produced by both functions
     return compare_matrices(result_func1, result_func2), timings_ds
 
 
