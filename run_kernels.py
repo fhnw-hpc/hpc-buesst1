@@ -9,11 +9,18 @@ from src.utils import (
 )
 from src.kernels.global_mem import fp32 as kernel_globalmem_fp32
 from src.kernels.global_mem import fp64 as kernel_globalmem_fp64
-from tabulate import tabulate
+from src.kernels.shared_mem import fp32 as kernel_sharedmem_fp32
+from src.kernels.shared_mem import fp64 as kernel_sharedmem_fp64
+from src.kernels.shared_mem import TILE_SIZE
 
 RECO_SHAPE = (1000, 1000)
 BLOCK_SIZE = (32, 32)
 PIN_MEMORY = True
+
+# because of tiling -> num threads must be >= tile size because otherwise not all elements will be loaded
+assert (
+    BLOCK_SIZE[0] * BLOCK_SIZE[1] >= TILE_SIZE
+), "number of threads must be bigger than tile size"
 
 if __name__ == "__main__":
     input = random_svd(RECO_SHAPE)
@@ -43,8 +50,14 @@ if __name__ == "__main__":
             make_reconstructor(
                 kernel_globalmem_fp32, BLOCK_SIZE, PIN_MEMORY, timeit=True
             ),
+            make_reconstructor(
+                kernel_sharedmem_fp64, BLOCK_SIZE, PIN_MEMORY, timeit=True
+            ),
+            make_reconstructor(
+                kernel_sharedmem_fp32, BLOCK_SIZE, PIN_MEMORY, timeit=True
+            ),
         ],
-        ["globalmem_fp64", "globalmem_fp32"],
+        ["globalmem_fp64", "globalmem_fp32", "sharedmem_fp64", "sharedmem_fp32"],
     )
 
     print(measurements)
