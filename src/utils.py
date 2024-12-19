@@ -3,6 +3,7 @@ import numba
 from numba import cuda
 import numpy as np
 import pandas as pd
+from typing import List
 
 
 class time_region:
@@ -184,6 +185,108 @@ def compare_kernels(input: tuple, reco_func1: callable, reco_func2: callable):
 
     # Compare the matrices produced by both functions
     return compare_matrices(result_func1, result_func2), timings_ds
+
+
+def get_timings(input: tuple, reco_func: callable):
+    """
+    Executes a reconstruction function and extracts the timing information.
+
+    Args:
+        input (tuple): Input data for the reconstruction function, typically (u, s, vt, k),
+            where `u` is the left singular matrix, `s` is the singular values,
+            `vt` is the right singular matrix, and `k` is the number of singular components to use.
+        reco_func (callable): The reconstruction function to evaluate. This function should return
+            a tuple containing the result and a dictionary of timings.
+
+    Returns:
+        pd.DataFrame: A DataFrame containing the timing information extracted from the reconstruction function.
+
+    Raises:
+        Exception: If the reconstruction function does not return a tuple with timings.
+    """
+
+    # Execute the reconstruction function
+    result_func = reco_func(*input)
+
+    # Ensure the function returns timings
+    if not isinstance(result_func, tuple):
+        raise Exception("No timings returned!")
+
+    # Extract timings from the result
+    _, timings_func = result_func
+
+    # Convert timings to a DataFrame
+    return pd.DataFrame.from_records([timings_func])
+
+
+def get_k_timings(input: tuple, reco_func: callable, k=10):
+    """
+    Executes a reconstruction function multiple times and collects timing information.
+
+    Args:
+        input (tuple): Input data for the reconstruction function, typically (u, s, vt, k),
+            where `u` is the left singular matrix, `s` is the singular values,
+            `vt` is the right singular matrix, and `k` is the number of singular components to use.
+        reco_func (callable): The reconstruction function to evaluate. This function should return
+            a tuple containing the result and a dictionary of timings.
+        k (int, optional): The number of repetitions to perform. Default is 10.
+
+    Returns:
+        pd.DataFrame: A DataFrame containing the timing information from all repetitions, with an
+        additional column indicating the repetition index.
+    """
+
+    dfs = []
+    for i in range(k):
+        # Get timings for the current repetition
+        df = get_timings(input, reco_func)
+        df["repeat"] = i  # Add repetition index
+        dfs.append(df)
+
+    # Combine all repetitions into a single DataFrame
+    return pd.concat(dfs)
+
+
+def get_k_timings_from_kernels(
+    input: tuple, reco_funcs=List[callable], names=List[str], k=10
+):
+    """
+    Executes multiple reconstruction functions repeatedly and collects timing information.
+
+    Args:
+        input (tuple): Input data for the reconstruction functions, typically (u, s, vt, k),
+            where `u` is the left singular matrix, `s` is the singular values,
+            `vt` is the right singular matrix, and `k` is the number of singular components to use.
+        reco_funcs (List[callable]): A list of reconstruction functions to evaluate. Each function
+            should return a tuple containing the result and a dictionary of timings.
+        names (List[str]): A list of names corresponding to the reconstruction functions.
+        k (int, optional): The number of repetitions to perform for each function. Default is 10.
+
+    Returns:
+        pd.DataFrame: A DataFrame containing the timing information from all functions and repetitions,
+        with additional columns indicating the function name and the repetition index.
+
+    Raises:
+        AssertionError: If the number of reconstruction functions does not match the number of names.
+    """
+
+    assert len(reco_funcs) == len(
+        names
+    ), "Each reconstruction function must have a corresponding name."
+
+    dfs = []
+    for i in range(len(reco_funcs)):
+        reco_func = reco_funcs[i]
+        name = names[i]
+
+        # Get timings for the current reconstruction function
+        df = get_k_timings(input, reco_func, k)
+        df["name"] = name  # Add function name
+
+        dfs.append(df)
+
+    # Combine all results into a single DataFrame
+    return pd.concat(dfs)
 
 
 def make_reconstructor(

@@ -3,6 +3,9 @@ from src.utils import (
     reconstruct_svd_broadcast_timeit,
     compare_kernels,
     random_svd,
+    get_timings,
+    get_k_timings,
+    get_k_timings_from_kernels,
 )
 from src.kernels.global_mem import fp32 as kernel_globalmem_fp32
 from src.kernels.global_mem import fp64 as kernel_globalmem_fp64
@@ -22,4 +25,26 @@ if __name__ == "__main__":
         reconstruct_svd_broadcast_timeit,
     )
 
-    print(timings)
+    print(
+        get_k_timings(
+            input,
+            make_reconstructor(
+                kernel_globalmem_fp64, BLOCK_SIZE, PIN_MEMORY, timeit=True
+            ),
+        )
+    )
+
+    measurements = get_k_timings_from_kernels(
+        input,
+        [
+            make_reconstructor(
+                kernel_globalmem_fp64, BLOCK_SIZE, PIN_MEMORY, timeit=True
+            ),
+            make_reconstructor(
+                kernel_globalmem_fp32, BLOCK_SIZE, PIN_MEMORY, timeit=True
+            ),
+        ],
+        ["globalmem_fp64", "globalmem_fp32"],
+    )
+
+    print(measurements)
