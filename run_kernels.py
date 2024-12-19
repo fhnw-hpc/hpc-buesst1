@@ -26,20 +26,20 @@ if __name__ == "__main__":
     input = random_svd(RECO_SHAPE)
     input = tuple(list(input) + [min(RECO_SHAPE)])
 
-    isequal, timings = compare_kernels(
+    # for sanity check -> fp64 vs numpy
+    isequal, _ = compare_kernels(
         input,
         make_reconstructor(kernel_globalmem_fp64, BLOCK_SIZE, PIN_MEMORY, timeit=True),
         reconstruct_svd_broadcast_timeit,
     )
+    assert isequal
 
-    print(
-        get_k_timings(
-            input,
-            make_reconstructor(
-                kernel_globalmem_fp64, BLOCK_SIZE, PIN_MEMORY, timeit=True
-            ),
-        )
+    isequal, _ = compare_kernels(
+        input,
+        make_reconstructor(kernel_sharedmem_fp64, BLOCK_SIZE, PIN_MEMORY, timeit=True),
+        reconstruct_svd_broadcast_timeit,
     )
+    assert isequal
 
     measurements = get_k_timings_from_kernels(
         input,
