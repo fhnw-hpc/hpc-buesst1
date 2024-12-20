@@ -429,7 +429,11 @@ def make_reconstructor(
 
         with time_region_cuda() as h_maloc_y:
             y_host = (
-                cuda.pinned_array_like(y_gpu) if pin_memory else np.empty_like(y_gpu)
+                cuda.pinned_array_like(y_gpu)
+                if pin_memory
+                else np.empty_like(
+                    y_gpu, dtype=y_dtype, order=y_order
+                )  # numpy doesn't derrive order...
             )
 
         # block_size is given as (num_rows, num_columns)
