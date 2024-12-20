@@ -27,13 +27,13 @@ if __name__ == "__main__":
     input = tuple(list(input) + [min(RECO_SHAPE)])
 
     reco_func = make_reconstructor(kernel_globalmem_fp64, BLOCK_SIZE)
-    reco_func(input)
+    reco_func(*input)
 
     reco_func = make_reconstructor(kernel_globalmem_fp32, BLOCK_SIZE)
-    reco_func(input)
+    reco_func(*input)
 
     reco_func = make_reconstructor(kernel_sharedmem_fp64, BLOCK_SIZE)
-    reco_func(input)
+    reco_func(*input)
 
     reco_func = make_reconstructor(kernel_sharedmem_fp32, BLOCK_SIZE)
-    reco_func(input)
+    reco_func(*input)
