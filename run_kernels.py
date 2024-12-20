@@ -1,5 +1,7 @@
 from src.utils import (
     make_reconstructor,
+    reconstruct_svd_broadcast,
+    compare_matrices,
     reconstruct_svd_broadcast_timeit,
     compare_kernels,
     random_svd,
@@ -26,14 +28,16 @@ if __name__ == "__main__":
     input = random_svd(RECO_SHAPE)
     input = tuple(list(input) + [min(RECO_SHAPE)])
 
+    ref = reconstruct_svd_broadcast(*input)
+
     reco_func = make_reconstructor(kernel_globalmem_fp64, BLOCK_SIZE)
-    reco_func(*input)
+    print("globalmem fp64 reco precise: ", compare_matrices(reco_func(*input), ref))
 
     reco_func = make_reconstructor(kernel_globalmem_fp32, BLOCK_SIZE)
-    reco_func(*input)
+    print("globalmem fp32 reco precise: ", compare_matrices(reco_func(*input), ref))
 
     reco_func = make_reconstructor(kernel_sharedmem_fp64, BLOCK_SIZE)
-    reco_func(*input)
+    print("sharedmem fp64 reco precise: ", compare_matrices(reco_func(*input), ref))
 
     reco_func = make_reconstructor(kernel_sharedmem_fp32, BLOCK_SIZE)
-    reco_func(*input)
+    print("sharedmem fp32 reco precise: ", compare_matrices(reco_func(*input), ref))

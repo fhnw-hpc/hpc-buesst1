@@ -45,13 +45,11 @@ def fp64(u, s, vt, k, y):
         # wait for all threads to finish the copy process
         cuda.syncthreads()
 
-        # only process if thread has a global index within final matrix
-        if row < u.shape[0] and col < vt.shape[1]:
-            # loop over tile
-            for p in range(TILE_SIZE):
-                idx = tile_nr * TILE_SIZE + p
-                if idx < k:
-                    element += u[row, idx] * s_s[p] * vt[idx, col]
+        # loop over tile
+        for p in range(TILE_SIZE):
+            idx = tile_nr * TILE_SIZE + p
+            if idx < k:
+                element += u[row, idx] * s_s[p] * vt[idx, col]
 
         # wait for all threads to finish
         cuda.syncthreads()
@@ -103,13 +101,11 @@ def fp32(u, s, vt, k, y):
         # wait for all threads to finish the copy process
         cuda.syncthreads()
 
-        # only process if thread has a global index within final matrix
-        if row < u.shape[0] and col < vt.shape[1]:
-            # loop over tile
-            for p in range(TILE_SIZE):
-                idx = tile_nr * TILE_SIZE + p
-                if idx < k:
-                    element += u[row, idx] * s_s[p] * vt[idx, col]
+        # loop over tile
+        for p in range(TILE_SIZE):
+            idx = tile_nr * TILE_SIZE + p
+            if idx < k:
+                element += u[row, idx] * s_s[p] * vt[idx, col]
 
         cuda.syncthreads()
 
