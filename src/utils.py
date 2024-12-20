@@ -296,13 +296,15 @@ def make_reconstructor(
     Creates a function to perform SVD reconstruction using a CUDA kernel.
 
     Args:
-        kernel (callable): The CUDA kernel function to perform reconstruction.
-        block_size (tuple): Tuple indicating the size of CUDA thread blocks (threads per block).
-        pin_memory (bool): Whether to use pinned memory for the output array. Default is False.
-        timeit (bool): Whether timings should also be calculated and returned
+        kernel (callable): The CUDA kernel function to perform the reconstruction.
+        block_size (tuple): The size of CUDA thread blocks as (num_rows, num_columns).
+                            Internally, the kernel will still consider the first dimension as columns (x)
+                            and the second dimension as rows (y).
+        pin_memory (bool): Whether to use pinned memory for the output array. Defaults to False.
+        timeit (bool): Whether to return timing information. Defaults to False.
 
     Returns:
-        callable: A function that performs SVD reconstruction on GPU.
+        callable: A function that performs SVD reconstruction on the GPU.
     """
 
     def infer_types_and_orders(kernel: cuda.dispatcher.CUDADispatcher):
@@ -313,7 +315,7 @@ def make_reconstructor(
             kernel (cuda.dispatcher.CUDADispatcher): The CUDA kernel.
 
         Returns:
-            list: A list of tuples, each containing dtype (NumPy type) and order (memory order, 'C' or 'F').
+            list: A list of tuples, each containing the dtype (string) and order ('C' or 'F').
         """
         assert (
             len(kernel.signatures) == 1
@@ -327,10 +329,8 @@ def make_reconstructor(
                 dtype = arg.dtype.name
                 order = "C" if arg.layout == "C" else "F"
                 types_and_orders.append((dtype, order))
-
             elif isinstance(arg, numba.types.Integer):
                 types_and_orders.append((arg.name, None))  # Scalars have no order
-
             else:
                 raise ValueError(
                     f"Unsupported argument type in kernel signature: {arg}"
@@ -343,114 +343,106 @@ def make_reconstructor(
         Perform SVD reconstruction for k components using the provided CUDA kernel.
 
         Args:
-            u (np.ndarray): Left singular vectors of shape (m, m).
+            u (np.ndarray): Left singular vectors of shape (m, n).
             s (np.ndarray): Singular values of shape (min(m, n),).
             vt (np.ndarray): Right singular vectors of shape (n, n).
             k (int): Number of singular components to use for reconstruction.
 
         Returns:
-            np.ndarray: Reconstructed matrix of shape (m, n).
+            np.ndarray: The reconstructed matrix of shape (m, n).
         """
-
-        # Infer types and orders for the inputs
         types_and_orders = infer_types_and_orders(kernel)
         u_dtype, u_order = types_and_orders[0]
         s_dtype, s_order = types_and_orders[1]
         vt_dtype, vt_order = types_and_orders[2]
         k_dtype, _ = types_and_orders[3]
 
-        # Ensure inputs have correct dtype and memory order
+        # Ensure inputs have the correct dtype and memory order
         u = np.array(u, dtype=u_dtype, order=u_order)
         s = np.array(s, dtype=s_dtype, order=s_order)
         vt = np.array(vt, dtype=vt_dtype, order=vt_order)
         k = getattr(np, k_dtype)(k)
 
-        # Send arrays to GPU
+        # Transfer arrays to GPU
         u_gpu = cuda.to_device(u)
         s_gpu = cuda.to_device(s)
         vt_gpu = cuda.to_device(vt)
 
         # Determine output array dimensions
         m, n = u.shape[0], vt.shape[1]
-        y_dtype, y_order = types_and_orders[
-            4
-        ]  # Assuming output type/order is defined in the kernel signature
+        y_dtype, y_order = types_and_orders[4]
         y_gpu = cuda.device_array((m, n), dtype=y_dtype, order=y_order)
 
-        # Allocate pinned memory for output if required
+        # Allocate host memory (pinned if requested)
         y_host = cuda.pinned_array_like(y_gpu) if pin_memory else np.empty_like(y_gpu)
 
-        # Define CUDA grid dimensions
-        blocks_per_grid_x = (m + block_size[0] - 1) // block_size[0]
-        blocks_per_grid_y = (n + block_size[1] - 1) // block_size[1]
+        # block_size is given as (num_rows, num_columns)
+        num_rows, num_columns = block_size
+
+        # Since we want col = x-dim and row = y-dim, blockDim should be (num_columns, num_rows)
+        # and grid dimensions should be calculated accordingly:
+        blocks_per_grid_x = (n + num_columns - 1) // num_columns  # columns mapped to x
+        blocks_per_grid_y = (m + num_rows - 1) // num_rows  # rows mapped to y
         blocks_per_grid = (blocks_per_grid_x, blocks_per_grid_y)
 
-        # Launch CUDA kernel
-        kernel[blocks_per_grid, block_size](u_gpu, s_gpu, vt_gpu, k, y_gpu)
+        # Launch CUDA kernel with adjusted block dimensions
+        kernel[blocks_per_grid, (num_columns, num_rows)](u_gpu, s_gpu, vt_gpu, k, y_gpu)
 
         # Copy result back to host
         y_gpu.copy_to_host(y_host)
-
         return y_host
 
     def inner_timed(u: np.ndarray, s: np.ndarray, vt: np.ndarray, k: int):
         """
-        Perform SVD reconstruction for k components using the provided CUDA kernel.
+        Perform SVD reconstruction for k components using the provided CUDA kernel and return timing information.
 
         Args:
-            u (np.ndarray): Left singular vectors of shape (m, m).
+            u (np.ndarray): Left singular vectors of shape (m, n).
             s (np.ndarray): Singular values of shape (min(m, n),).
             vt (np.ndarray): Right singular vectors of shape (n, n).
             k (int): Number of singular components to use for reconstruction.
 
         Returns:
-            np.ndarray: Reconstructed matrix of shape (m, n).
+            (np.ndarray, dict): The reconstructed matrix and a dictionary with timing details.
         """
-
-        # Infer types and orders for the inputs
         types_and_orders = infer_types_and_orders(kernel)
         u_dtype, u_order = types_and_orders[0]
         s_dtype, s_order = types_and_orders[1]
         vt_dtype, vt_order = types_and_orders[2]
         k_dtype, _ = types_and_orders[3]
 
-        # Ensure inputs have correct dtype and memory order
         u = np.array(u, dtype=u_dtype, order=u_order)
         s = np.array(s, dtype=s_dtype, order=s_order)
         vt = np.array(vt, dtype=vt_dtype, order=vt_order)
         k = getattr(np, k_dtype)(k)
 
         with time_region_cuda() as h2d:
-            # Send arrays to GPU
             u_gpu = cuda.to_device(u)
             s_gpu = cuda.to_device(s)
             vt_gpu = cuda.to_device(vt)
 
-        # Determine output array dimensions
         m, n = u.shape[0], vt.shape[1]
-        y_dtype, y_order = types_and_orders[
-            4
-        ]  # Assuming output type/order is defined in the kernel signature
+        y_dtype, y_order = types_and_orders[4]
 
         with time_region_cuda() as d_maloc_y:
             y_gpu = cuda.device_array((m, n), dtype=y_dtype, order=y_order)
 
         with time_region_cuda() as h_maloc_y:
-            # Allocate pinned memory for output if required
             y_host = (
                 cuda.pinned_array_like(y_gpu) if pin_memory else np.empty_like(y_gpu)
             )
 
-        # Define CUDA grid dimensions
-        blocks_per_grid_x = (m + block_size[0] - 1) // block_size[0]
-        blocks_per_grid_y = (n + block_size[1] - 1) // block_size[1]
+        # block_size is given as (num_rows, num_columns)
+        num_rows, num_columns = block_size
+        blocks_per_grid_x = (n + num_columns - 1) // num_columns
+        blocks_per_grid_y = (m + num_rows - 1) // num_rows
         blocks_per_grid = (blocks_per_grid_x, blocks_per_grid_y)
 
-        # Launch CUDA kernel
         with time_region_cuda() as kernel_t:
-            kernel[blocks_per_grid, block_size](u_gpu, s_gpu, vt_gpu, k, y_gpu)
+            kernel[blocks_per_grid, (num_columns, num_rows)](
+                u_gpu, s_gpu, vt_gpu, k, y_gpu
+            )
 
-        # Copy result back to host
         with time_region_cuda() as d2h:
             y_gpu.copy_to_host(y_host)
 

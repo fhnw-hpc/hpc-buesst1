@@ -1,6 +1,6 @@
 from numba import cuda, float32, float64
 
-TILE_SIZE = 128
+TILE_SIZE = 32
 
 
 @cuda.jit(
@@ -8,7 +8,7 @@ TILE_SIZE = 128
     fastmath=True,
 )
 def fp64(u, s, vt, k, y):
-    """SVD reconstruction for k components using cuda. FP64 operation (slower but more accurate than FP64)
+    """SVD reconstruction for k components using cuda. FP64 operation (slower but more accurate)
 
     Inputs:
     u (m,n): array
@@ -17,7 +17,8 @@ def fp64(u, s, vt, k, y):
     k int: number of reconstructed singular components
     y (m,n): output array
     """
-    m, n = cuda.grid(2)
+    # col = x-dimension, row = y-dimension
+    col, row = cuda.grid(2)
 
     # init shared array
     s_s = cuda.shared.array(shape=TILE_SIZE, dtype=float64)
@@ -35,8 +36,9 @@ def fp64(u, s, vt, k, y):
     for tile_nr in range(num_tiles):
         # only copy if threadID is smaller than TILE_SIZE
         if threadID < TILE_SIZE:
-            if (tile_nr * TILE_SIZE + threadID) < k:
-                s_s[threadID] = s[tile_nr * TILE_SIZE + threadID]
+            idx = tile_nr * TILE_SIZE + threadID
+            if idx < k:
+                s_s[threadID] = s[idx]
             else:
                 s_s[threadID] = float64(0)
 
@@ -44,23 +46,19 @@ def fp64(u, s, vt, k, y):
         cuda.syncthreads()
 
         # only process if thread has a global index within final matrix
-        if m < u.shape[0] and n < vt.shape[1]:
+        if row < u.shape[0] and col < vt.shape[1]:
             # loop over tile
             for p in range(TILE_SIZE):
-                # only add if element < k
-                if tile_nr * TILE_SIZE + p < k:
-                    element += (
-                        u[m, tile_nr * TILE_SIZE + p]
-                        * s_s[p]
-                        * vt[tile_nr * TILE_SIZE + p, n]
-                    )
+                idx = tile_nr * TILE_SIZE + p
+                if idx < k:
+                    element += u[row, idx] * s_s[p] * vt[idx, col]
 
-        # wait for all threads to finish dot product
+        # wait for all threads to finish
         cuda.syncthreads()
 
-    # only write to global memory if n and m are in range
-    if m < y.shape[0] and n < y.shape[1]:
-        y[m, n] = element
+    # only write to global memory if indices are in range
+    if row < y.shape[0] and col < y.shape[1]:
+        y[row, col] = element
 
 
 @cuda.jit(
@@ -68,7 +66,7 @@ def fp64(u, s, vt, k, y):
     fastmath=True,
 )
 def fp32(u, s, vt, k, y):
-    """SVD reconstruction for k components using cuda. FP64 operation (slower but more accurate than FP64)
+    """SVD reconstruction for k components using cuda. FP32 operation (faster but lower precision)
 
     Inputs:
     u (m,n): array
@@ -77,7 +75,8 @@ def fp32(u, s, vt, k, y):
     k int: number of reconstructed singular components
     y (m,n): output array
     """
-    m, n = cuda.grid(2)
+    # col = x-dimension, row = y-dimension
+    col, row = cuda.grid(2)
 
     # init shared array
     s_s = cuda.shared.array(shape=TILE_SIZE, dtype=float32)
@@ -95,8 +94,9 @@ def fp32(u, s, vt, k, y):
     for tile_nr in range(num_tiles):
         # only copy if threadID is smaller than TILE_SIZE
         if threadID < TILE_SIZE:
-            if (tile_nr * TILE_SIZE + threadID) < k:
-                s_s[threadID] = s[tile_nr * TILE_SIZE + threadID]
+            idx = tile_nr * TILE_SIZE + threadID
+            if idx < k:
+                s_s[threadID] = s[idx]
             else:
                 s_s[threadID] = float32(0)
 
@@ -104,20 +104,15 @@ def fp32(u, s, vt, k, y):
         cuda.syncthreads()
 
         # only process if thread has a global index within final matrix
-        if m < u.shape[0] and n < vt.shape[1]:
+        if row < u.shape[0] and col < vt.shape[1]:
             # loop over tile
             for p in range(TILE_SIZE):
-                # only add if element < k
-                if tile_nr * TILE_SIZE + p < k:
-                    element += (
-                        u[m, tile_nr * TILE_SIZE + p]
-                        * s_s[p]
-                        * vt[tile_nr * TILE_SIZE + p, n]
-                    )
+                idx = tile_nr * TILE_SIZE + p
+                if idx < k:
+                    element += u[row, idx] * s_s[p] * vt[idx, col]
 
-        # wait for all threads to finish dot product
         cuda.syncthreads()
 
-    # only write to global memory if n and m are in range
-    if m < y.shape[0] and n < y.shape[1]:
-        y[m, n] = element
+    # only write to global memory if indices are in range
+    if row < y.shape[0] and col < y.shape[1]:
+        y[row, col] = element
