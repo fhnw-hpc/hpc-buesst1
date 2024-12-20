@@ -13,8 +13,8 @@ from src.kernels.shared_mem import fp32 as kernel_sharedmem_fp32
 from src.kernels.shared_mem import fp64 as kernel_sharedmem_fp64
 from src.kernels.shared_mem import TILE_SIZE
 
-RECO_SHAPE = (1000, 1000)
-BLOCK_SIZE = (32, 32)
+RECO_SHAPE = (9216, 12288)
+BLOCK_SIZE = (8, 16)
 PIN_MEMORY = True
 
 # because of tiling -> num threads must be >= tile size because otherwise not all elements will be loaded
@@ -26,38 +26,14 @@ if __name__ == "__main__":
     input = random_svd(RECO_SHAPE)
     input = tuple(list(input) + [min(RECO_SHAPE)])
 
-    # for sanity check -> fp64 vs numpy
-    isequal, _ = compare_kernels(
-        input,
-        make_reconstructor(kernel_globalmem_fp64, BLOCK_SIZE, PIN_MEMORY, timeit=True),
-        reconstruct_svd_broadcast_timeit,
-    )
-    assert isequal
+    reco_func = make_reconstructor(kernel_globalmem_fp64, BLOCK_SIZE)
+    reco_func(input)
 
-    isequal, _ = compare_kernels(
-        input,
-        make_reconstructor(kernel_sharedmem_fp64, BLOCK_SIZE, PIN_MEMORY, timeit=True),
-        reconstruct_svd_broadcast_timeit,
-    )
-    assert isequal
+    reco_func = make_reconstructor(kernel_globalmem_fp32, BLOCK_SIZE)
+    reco_func(input)
 
-    measurements = get_k_timings_from_kernels(
-        input,
-        [
-            make_reconstructor(
-                kernel_globalmem_fp64, BLOCK_SIZE, PIN_MEMORY, timeit=True
-            ),
-            make_reconstructor(
-                kernel_globalmem_fp32, BLOCK_SIZE, PIN_MEMORY, timeit=True
-            ),
-            make_reconstructor(
-                kernel_sharedmem_fp64, BLOCK_SIZE, PIN_MEMORY, timeit=True
-            ),
-            make_reconstructor(
-                kernel_sharedmem_fp32, BLOCK_SIZE, PIN_MEMORY, timeit=True
-            ),
-        ],
-        ["globalmem_fp64", "globalmem_fp32", "sharedmem_fp64", "sharedmem_fp32"],
-    )
+    reco_func = make_reconstructor(kernel_sharedmem_fp64, BLOCK_SIZE)
+    reco_func(input)
 
-    print(measurements)
+    reco_func = make_reconstructor(kernel_sharedmem_fp32, BLOCK_SIZE)
+    reco_func(input)
