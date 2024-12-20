@@ -13,7 +13,7 @@ from src.kernels.shared_mem import fp32 as kernel_sharedmem_fp32
 from src.kernels.shared_mem import fp64 as kernel_sharedmem_fp64
 from src.kernels.shared_mem import TILE_SIZE
 
-RECO_SHAPE = (9216, 12288)
+RECO_SHAPE = (3072, 4096)
 BLOCK_SIZE = (8, 16)
 PIN_MEMORY = True
 
