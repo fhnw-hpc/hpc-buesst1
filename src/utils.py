@@ -401,6 +401,8 @@ def make_reconstructor(
         vt = np.array(vt, dtype=vt_dtype, order=vt_order)
         k = getattr(np, k_dtype)(k)
 
+        # pinning of u,s,vt isn't done here since DMA (Direct Memory Access) brings not really an advantage here
+
         # Transfer to GPU
         u_gpu = cuda.to_device(u)
         s_gpu = cuda.to_device(s)
@@ -459,6 +461,8 @@ def make_reconstructor(
         s = np.array(s, dtype=s_dtype, order=s_order)
         vt = np.array(vt, dtype=vt_dtype, order=vt_order)
         k = getattr(np, k_dtype)(k)
+
+        # pinning of u,s,vt isn't done here since DMA (Direct Memory Access) brings not really an advantage here
 
         with time_region_cuda() as h2d:
             u_gpu = cuda.to_device(u)
@@ -561,9 +565,24 @@ def make_reconstructor(
 
         # Transfer, launch, copy back in each stream
         for i in range(n_jobs):
-            u_i = np.array(u_list[i], dtype=u_dtype, order=u_order)
-            s_i = np.array(s_list[i], dtype=s_dtype, order=s_order)
-            vt_i = np.array(vt_list[i], dtype=vt_dtype, order=vt_order)
+            # here in steams also the input arrays must be pinned to use the DMA engines (Direct Memory Access)
+            if pin_memory:
+                # create pinned array
+                u_i = cuda.pinned_array(u_list[i].shape, dtype=u_dtype, order=u_order)
+                s_i = cuda.pinned_array(s_list[i].shape, dtype=s_dtype, order=s_order)
+                vt_i = cuda.pinned_array(vt_list[i].shape, dtype=vt_dtype, order=vt_order)
+
+                # copy data to pinned array
+                np.copyto(u_i, u_list[i])
+                np.copyto(s_i, s_list[i])
+                np.copyto(vt_i, vt_list[i])
+
+            else:
+
+                u_i = np.array(u_list[i], dtype=u_dtype, order=u_order)
+                s_i = np.array(s_list[i], dtype=s_dtype, order=s_order)
+                vt_i = np.array(vt_list[i], dtype=vt_dtype, order=vt_order)
+
             k_i = getattr(np, k_dtype)(k_list[i])
 
             u_gpu = cuda.to_device(u_i, stream=streams[i])
