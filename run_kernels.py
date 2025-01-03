@@ -59,3 +59,20 @@ if __name__ == "__main__":
             )
         ],
     )
+
+    reco_func = make_reconstructor(
+        kernel_globalmem_fp32,
+        BLOCK_SIZE,
+        PIN_MEMORY,
+        use_streams=True,
+    )
+
+    print(
+        "globalmem fp32 reco streamed precise: ",
+        [
+            compare_matrices(result, ref)
+            for result in reco_func(
+                *([input[0]] * NUM_STREAMS, [input[1]] * NUM_STREAMS, [input[2]] * NUM_STREAMS, [input[3]] * NUM_STREAMS)
+            )
+        ],
+    )
