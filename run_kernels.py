@@ -41,3 +41,20 @@ if __name__ == "__main__":
 
     reco_func = make_reconstructor(kernel_sharedmem_fp32, BLOCK_SIZE)
     print("sharedmem fp32 reco precise: ", compare_matrices(reco_func(*input), ref))
+
+    reco_func = make_reconstructor(
+        kernel_globalmem_fp64,
+        BLOCK_SIZE,
+        pin_memory=True,
+        use_streams=True,
+    )
+
+    print(
+        "globalmem fp64 reco streamed precise: ",
+        [
+            compare_matrices(result, ref)
+            for result in reco_func(
+                *([input[0]] * 4, [input[1]] * 4, [input[2]] * 4, [input[3]] * 4)
+            )
+        ],
+    )
