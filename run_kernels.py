@@ -15,7 +15,7 @@ from src.kernels.shared_mem import fp32 as kernel_sharedmem_fp32
 from src.kernels.shared_mem import fp64 as kernel_sharedmem_fp64
 from src.kernels.shared_mem import TILE_SIZE
 
-RECO_SHAPE = (768, 1024)
+RECO_SHAPE = (256, 342) #  (768, 1024) -> if kernel size is too big the kernels are run in series
 BLOCK_SIZE = (8, 16)
 PIN_MEMORY = True
 NUM_STREAMS = 50
