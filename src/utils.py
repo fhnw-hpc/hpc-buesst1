@@ -3,10 +3,16 @@ import numba
 from numba import cuda
 import numpy as np
 import pandas as pd
-from typing import List
+from typing import List, Union
 
 
 class time_region:
+    """Context Manager for CPU-based time measurement.
+
+    Args:
+        time_offset (float, optional): Optional time offset to be added. Defaults to 0.
+    """
+
     def __init__(self, time_offset=0):
         self._time_offset = time_offset
 
@@ -18,10 +24,23 @@ class time_region:
         self._t_end = time.time()
 
     def elapsed_time_s(self):
+        """Get the elapsed time in seconds.
+
+        Returns:
+            float: The measured time including any time offset.
+        """
         return self._time_offset + (self._t_end - self._t_start)
 
 
 class time_region_cuda:
+    """Context Manager for GPU-based time measurement with CUDA streams.
+
+    Args:
+        time_offset (float, optional): Optional time offset to be added. Defaults to 0.
+        cuda_stream (int or cuda.cudadrv.stream.Stream, optional): CUDA stream to use for recording events.
+            Defaults to 0 (the default stream).
+    """
+
     def __init__(self, time_offset=0, cuda_stream=0):
         self._t_start = cuda.event(timing=True)
         self._t_end = cuda.event(timing=True)
@@ -29,14 +48,21 @@ class time_region_cuda:
         self._cuda_stream = cuda_stream
 
     def __enter__(self):
+        """Record the start event on the given stream."""
         self._t_start.record(self._cuda_stream)
         return self
 
     def __exit__(self, exec_type, exec_value, traceback):
+        """Record and synchronize the end event on the given stream."""
         self._t_end.record(self._cuda_stream)
         self._t_end.synchronize()
 
     def elapsed_time_s(self):
+        """Get the elapsed time in seconds.
+
+        Returns:
+            float: The measured time including any time offset.
+        """
         return self._time_offset + 1e-3 * cuda.event_elapsed_time(
             self._t_start, self._t_end
         )
@@ -290,63 +316,74 @@ def get_k_timings_from_kernels(
 
 
 def make_reconstructor(
-    kernel: callable, block_size: tuple, pin_memory: bool = False, timeit: bool = False
+    kernel: callable,
+    block_size: tuple,
+    pin_memory: bool = False,
+    timeit: bool = False,
+    use_streams: bool = False,
 ):
-    """
-    Creates a function to perform SVD reconstruction using a CUDA kernel.
+    """Creates one or more reconstruction functions using a provided CUDA kernel.
 
     Args:
-        kernel (callable): The CUDA kernel function to perform the reconstruction.
-        block_size (tuple): The size of CUDA thread blocks as (num_rows, num_columns).
-                            Internally, the kernel will still consider the first dimension as columns (x)
-                            and the second dimension as rows (y).
-        pin_memory (bool): Whether to use pinned memory for the output array. Defaults to False.
-        timeit (bool): Whether to return timing information. Defaults to False.
+        kernel (callable): The CUDA kernel function to be used for reconstruction.
+        block_size (tuple): The size of the CUDA thread block, as (num_rows, num_columns).
+            Note: internally columns map to x-dim and rows map to y-dim.
+        pin_memory (bool, optional): If True, the output array will use pinned host memory. Defaults to False.
+        timeit (bool, optional): If True, a timed version of the reconstruction function is returned. Defaults to False.
+        use_streams (bool, optional): If True, a version accepting lists of (u, s, vt) to process in parallel streams
+            is returned. Defaults to False.
 
     Returns:
-        callable: A function that performs SVD reconstruction on the GPU.
+        callable: Depending on the flags, one of the following functions:
+            - If `use_streams=False` and `timeit=False`:
+                `inner(u, s, vt, k) -> np.ndarray`
+            - If `use_streams=False` and `timeit=True`:
+                `inner_timed(u, s, vt, k) -> (np.ndarray, dict)`
+            - If `use_streams=True` and `timeit=False`:
+                `inner_streams_no_timing(u_list, s_list, vt_list, k) -> List[np.ndarray]`
+            - If `use_streams=True` and `timeit=True`:
+                `inner_streams_timed(u_list, s_list, vt_list, k) -> (List[np.ndarray], List[dict])`
     """
 
     def infer_types_and_orders(kernel: cuda.dispatcher.CUDADispatcher):
-        """
-        Infers the data types and memory orders of kernel arguments from the kernel signature.
+        """Infers data types and memory order from the kernel's signature.
 
         Args:
-            kernel (cuda.dispatcher.CUDADispatcher): The CUDA kernel.
+            kernel (cuda.dispatcher.CUDADispatcher): The Numba CUDA kernel with exactly one signature.
 
         Returns:
-            list: A list of tuples, each containing the dtype (string) and order ('C' or 'F').
+            list: A list of tuples (dtype_string, order), or (dtype_string, None) for scalars.
+
+        Raises:
+            ValueError: If an unsupported argument type is found in the kernel signature.
         """
         assert (
             len(kernel.signatures) == 1
-        ), "Numba kernel is not allowed to have multiple signatures"
-
+        ), "Numba kernel is not allowed to have multiple signatures."
         signature = kernel.signatures[0]
         types_and_orders = []
-
         for arg in signature:
             if isinstance(arg, numba.types.npytypes.Array):
-                dtype = arg.dtype.name
+                dtype = arg.dtype.name  # e.g., 'float64'
                 order = "C" if arg.layout == "C" else "F"
                 types_and_orders.append((dtype, order))
             elif isinstance(arg, numba.types.Integer):
-                types_and_orders.append((arg.name, None))  # Scalars have no order
+                # For int32, int64, etc.
+                types_and_orders.append((arg.name, None))
             else:
                 raise ValueError(
                     f"Unsupported argument type in kernel signature: {arg}"
                 )
-
         return types_and_orders
 
     def inner(u: np.ndarray, s: np.ndarray, vt: np.ndarray, k: int):
-        """
-        Perform SVD reconstruction for k components using the provided CUDA kernel.
+        """Reconstruct a single matrix using the provided CUDA kernel.
 
         Args:
-            u (np.ndarray): Left singular vectors of shape (m, n).
+            u (np.ndarray): Left singular matrix of shape (m, n).
             s (np.ndarray): Singular values of shape (min(m, n),).
-            vt (np.ndarray): Right singular vectors of shape (n, n).
-            k (int): Number of singular components to use for reconstruction.
+            vt (np.ndarray): Right singular matrix of shape (n, n).
+            k (int): Number of singular components to use.
 
         Returns:
             np.ndarray: The reconstructed matrix of shape (m, n).
@@ -356,25 +393,22 @@ def make_reconstructor(
         s_dtype, s_order = types_and_orders[1]
         vt_dtype, vt_order = types_and_orders[2]
         k_dtype, _ = types_and_orders[3]
+        y_dtype, y_order = types_and_orders[4]
 
-        # Ensure inputs have the correct dtype and memory order
+        # Match dtypes/orders
         u = np.array(u, dtype=u_dtype, order=u_order)
         s = np.array(s, dtype=s_dtype, order=s_order)
         vt = np.array(vt, dtype=vt_dtype, order=vt_order)
         k = getattr(np, k_dtype)(k)
 
-        # Transfer arrays to GPU
+        # Transfer to GPU
         u_gpu = cuda.to_device(u)
         s_gpu = cuda.to_device(s)
         vt_gpu = cuda.to_device(vt)
 
         # Determine output array dimensions
         m, n = u.shape[0], vt.shape[1]
-        y_dtype, y_order = types_and_orders[4]
         y_gpu = cuda.device_array((m, n), dtype=y_dtype, order=y_order)
-
-        # Allocate host memory (pinned if requested)
-        y_host = cuda.pinned_array_like(y_gpu) if pin_memory else np.empty_like(y_gpu)
 
         # block_size is given as (num_rows, num_columns)
         num_rows, num_columns = block_size
@@ -388,29 +422,39 @@ def make_reconstructor(
         # Launch CUDA kernel with adjusted block dimensions
         kernel[blocks_per_grid, (num_columns, num_rows)](u_gpu, s_gpu, vt_gpu, k, y_gpu)
 
+        # allocate memory on host and pin if requrested
+        if pin_memory:
+            y_host = cuda.pinned_array_like(y_gpu)
+        else:
+            # Ensure correct shape/order
+            y_host = np.empty((m, n), dtype=y_dtype, order=y_order)
+
         # Copy result back to host
         y_gpu.copy_to_host(y_host)
+
         return y_host
 
     def inner_timed(u: np.ndarray, s: np.ndarray, vt: np.ndarray, k: int):
-        """
-        Perform SVD reconstruction for k components using the provided CUDA kernel and return timing information.
+        """Reconstruct a single matrix using the provided CUDA kernel and measure timings.
 
         Args:
-            u (np.ndarray): Left singular vectors of shape (m, n).
+            u (np.ndarray): Left singular matrix of shape (m, n).
             s (np.ndarray): Singular values of shape (min(m, n),).
-            vt (np.ndarray): Right singular vectors of shape (n, n).
-            k (int): Number of singular components to use for reconstruction.
+            vt (np.ndarray): Right singular matrix of shape (n, n).
+            k (int): Number of singular components to use.
 
         Returns:
-            (np.ndarray, dict): The reconstructed matrix and a dictionary with timing details.
+            Tuple[np.ndarray, dict]:
+                A tuple of (reconstructed matrix, dictionary of timing information).
         """
         types_and_orders = infer_types_and_orders(kernel)
         u_dtype, u_order = types_and_orders[0]
         s_dtype, s_order = types_and_orders[1]
         vt_dtype, vt_order = types_and_orders[2]
         k_dtype, _ = types_and_orders[3]
+        y_dtype, y_order = types_and_orders[4]
 
+        # Data conversions
         u = np.array(u, dtype=u_dtype, order=u_order)
         s = np.array(s, dtype=s_dtype, order=s_order)
         vt = np.array(vt, dtype=vt_dtype, order=vt_order)
@@ -422,19 +466,9 @@ def make_reconstructor(
             vt_gpu = cuda.to_device(vt)
 
         m, n = u.shape[0], vt.shape[1]
-        y_dtype, y_order = types_and_orders[4]
 
         with time_region_cuda() as d_maloc_y:
             y_gpu = cuda.device_array((m, n), dtype=y_dtype, order=y_order)
-
-        with time_region_cuda() as h_maloc_y:
-            y_host = (
-                cuda.pinned_array_like(y_gpu)
-                if pin_memory
-                else np.empty_like(
-                    y_gpu, dtype=y_dtype, order=y_order
-                )  # numpy doesn't derrive order...
-            )
 
         # block_size is given as (num_rows, num_columns)
         num_rows, num_columns = block_size
@@ -443,33 +477,145 @@ def make_reconstructor(
         blocks_per_grid = (blocks_per_grid_x, blocks_per_grid_y)
 
         with time_region_cuda() as kernel_t:
+            # start kernel execution
             kernel[blocks_per_grid, (num_columns, num_rows)](
                 u_gpu, s_gpu, vt_gpu, k, y_gpu
             )
 
+        with time_region_cuda() as h_maloc_y:
+            # allocate memory on host and pin if requrested
+            if pin_memory:
+                y_host = cuda.pinned_array_like(y_gpu)
+            else:
+                # Ensure correct shape/order
+                y_host = np.empty((m, n), dtype=y_dtype, order=y_order)
+
         with time_region_cuda() as d2h:
+            # copy data back to host
             y_gpu.copy_to_host(y_host)
 
+        # Collect timings
         timings = {
             "h2d": h2d.elapsed_time_s(),
             "d_maloc_y": d_maloc_y.elapsed_time_s(),
             "h_maloc_y": h_maloc_y.elapsed_time_s(),
             "kernel": kernel_t.elapsed_time_s(),
             "d2h": d2h.elapsed_time_s(),
-            "mem_operations_total": h2d.elapsed_time_s()
-            + d_maloc_y.elapsed_time_s()
-            + h_maloc_y.elapsed_time_s()
-            + d2h.elapsed_time_s(),
-            "total": h2d.elapsed_time_s()
-            + d_maloc_y.elapsed_time_s()
-            + h_maloc_y.elapsed_time_s()
-            + d2h.elapsed_time_s()
-            + kernel_t.elapsed_time_s(),
         }
+        mem_operations_total = (
+            timings["h2d"]
+            + timings["d_maloc_y"]
+            + timings["h_maloc_y"]
+            + timings["d2h"]
+        )
+        timings["mem_operations_total"] = mem_operations_total
+        timings["total"] = mem_operations_total + timings["kernel"]
 
         return y_host, timings
 
-    return inner_timed if timeit else inner
+    def inner_streams(
+        u_list: List[np.ndarray],
+        s_list: List[np.ndarray],
+        vt_list: List[np.ndarray],
+        k: Union[int, List[int]],
+    ):
+        """Reconstruct multiple matrices in parallel streams.
+
+        Args:
+            u_list (List[np.ndarray]): List of 'u' matrices (each shape (m, n)).
+            s_list (List[np.ndarray]): List of 's' vectors (each shape (min(m, n),)).
+            vt_list (List[np.ndarray]): List of 'vt' matrices (each shape (n, n)).
+            k (Union[int, List[int]]): Number of singular components to use. Can be a single int
+                applied to all jobs or a list of length len(u_list).
+
+        Returns:
+            List[np.ndarray]: A list of reconstructed matrices, one per input triplet.
+        """
+
+        assert (
+            len(u_list) == len(s_list) == len(vt_list)
+        ), "Input lists must have the same length."
+
+        n_jobs = len(u_list)
+
+        # Normalize k to a list
+        if isinstance(k, int):
+            k_list = [k] * n_jobs
+        else:
+            k_list = k
+            assert (
+                len(k_list) == n_jobs
+            ), "If k is a list, it must match the number of jobs."
+
+        # Kernel signature
+        types_and_orders = infer_types_and_orders(kernel)
+        u_dtype, u_order = types_and_orders[0]
+        s_dtype, s_order = types_and_orders[1]
+        vt_dtype, vt_order = types_and_orders[2]
+        k_dtype, _ = types_and_orders[3]
+        y_dtype, y_order = types_and_orders[4]
+
+        # Create streams
+        streams = [cuda.stream() for _ in range(n_jobs)]
+        results = [None] * n_jobs
+
+        # Transfer, launch, copy back in each stream
+        for i in range(n_jobs):
+            u_i = np.array(u_list[i], dtype=u_dtype, order=u_order)
+            s_i = np.array(s_list[i], dtype=s_dtype, order=s_order)
+            vt_i = np.array(vt_list[i], dtype=vt_dtype, order=vt_order)
+            k_i = getattr(np, k_dtype)(k_list[i])
+
+            u_gpu = cuda.to_device(u_i, stream=streams[i])
+            s_gpu = cuda.to_device(s_i, stream=streams[i])
+            vt_gpu = cuda.to_device(vt_i, stream=streams[i])
+
+            m, n = u_i.shape[0], vt_i.shape[1]
+            y_gpu = cuda.device_array(
+                (m, n), dtype=y_dtype, order=y_order, stream=streams[i]
+            )
+
+            num_rows, num_columns = block_size
+            blocks_per_grid_x = (n + num_columns - 1) // num_columns
+            blocks_per_grid_y = (m + num_rows - 1) // num_rows
+            blocks_per_grid = (blocks_per_grid_x, blocks_per_grid_y)
+
+            kernel[
+                blocks_per_grid,
+                (num_columns, num_rows),
+                streams[i],
+            ](u_gpu, s_gpu, vt_gpu, k_i, y_gpu)
+
+            # allocate memory on host and pin if requrested
+            if pin_memory:
+                y_host = cuda.pinned_array_like(y_gpu)
+            else:
+                # Ensure correct shape/order
+                y_host = np.empty((m, n), dtype=y_dtype, order=y_order)
+
+            # Copy result back to host
+            y_gpu.copy_to_host(y_host, stream=streams[i])
+            results[i] = y_host
+
+        # Synchronize
+        for i in range(n_jobs):
+            streams[i].synchronize()
+
+        return results
+
+    # Decide which function to return
+    if use_streams:
+        if timeit:
+            raise NotImplementedError(
+                "timeit is not implemented for streamed operation"
+            )
+
+        return inner_streams
+    else:
+        if timeit:
+            return inner_timed
+        else:
+            return inner
 
 
 # Example usage (to be implemented in a separate module):
