@@ -245,7 +245,7 @@ def get_timings(input: tuple, reco_func: callable):
     return pd.DataFrame.from_records([timings_func])
 
 
-def get_k_timings(input: tuple, reco_func: callable, k=10):
+def get_n_timings(input: tuple, reco_func: callable, n=10):
     """
     Executes a reconstruction function multiple times and collects timing information.
 
@@ -255,7 +255,7 @@ def get_k_timings(input: tuple, reco_func: callable, k=10):
             `vt` is the right singular matrix, and `k` is the number of singular components to use.
         reco_func (callable): The reconstruction function to evaluate. This function should return
             a tuple containing the result and a dictionary of timings.
-        k (int, optional): The number of repetitions to perform. Default is 10.
+        n (int, optional): The number of repetitions to perform. Default is 10.
 
     Returns:
         pd.DataFrame: A DataFrame containing the timing information from all repetitions, with an
@@ -263,7 +263,7 @@ def get_k_timings(input: tuple, reco_func: callable, k=10):
     """
 
     dfs = []
-    for i in range(k):
+    for i in range(n):
         # Get timings for the current repetition
         df = get_timings(input, reco_func)
         df["repeat"] = i  # Add repetition index
@@ -273,8 +273,8 @@ def get_k_timings(input: tuple, reco_func: callable, k=10):
     return pd.concat(dfs)
 
 
-def get_k_timings_from_inputs(
-    inputs: List[tuple], reco_func: callable, names=List[str], k=10
+def get_n_timings_from_inputs(
+    inputs: List[tuple], reco_func: callable, names=List[str], n=10
 ):
     """
     Executes multiple reconstructions from different inputs repeatedly and collects timing information.
@@ -286,7 +286,7 @@ def get_k_timings_from_inputs(
         reco_func (callable): The reconstruction function to evaluate. This function should return
             a tuple containing the result and a dictionary of timings.
         names (List[str]): A list of names corresponding to the inputs.
-        k (int, optional): The number of repetitions to perform for each input. Default is 10.
+        n (int, optional): The number of repetitions to perform for each input. Default is 10.
 
     Returns:
         pd.DataFrame: A DataFrame containing the timing information from all inputs and repetitions,
@@ -304,7 +304,7 @@ def get_k_timings_from_inputs(
         name = names[i]
 
         # Get timings for the current input
-        df = get_k_timings(input, reco_func, k)
+        df = get_n_timings(input, reco_func, n)
         df["input_name"] = name  # Add input name
 
         dfs.append(df)
@@ -313,8 +313,8 @@ def get_k_timings_from_inputs(
     return pd.concat(dfs)
 
 
-def get_k_timings_from_kernels(
-    input: tuple, reco_funcs=List[callable], names=List[str], k=10
+def get_n_timings_from_kernels(
+    input: tuple, reco_funcs=List[callable], names=List[str], n=10
 ):
     """
     Executes multiple reconstruction functions repeatedly and collects timing information.
@@ -326,7 +326,7 @@ def get_k_timings_from_kernels(
         reco_funcs (List[callable]): A list of reconstruction functions to evaluate. Each function
             should return a tuple containing the result and a dictionary of timings.
         names (List[str]): A list of names corresponding to the reconstruction functions.
-        k (int, optional): The number of repetitions to perform for each function. Default is 10.
+        n (int, optional): The number of repetitions to perform for each function. Default is 10.
 
     Returns:
         pd.DataFrame: A DataFrame containing the timing information from all functions and repetitions,
@@ -346,7 +346,7 @@ def get_k_timings_from_kernels(
         name = names[i]
 
         # Get timings for the current reconstruction function
-        df = get_k_timings(input, reco_func, k)
+        df = get_n_timings(input, reco_func, n)
         df["reco_name"] = name  # Add function name
 
         dfs.append(df)
@@ -355,12 +355,12 @@ def get_k_timings_from_kernels(
     return pd.concat(dfs)
 
 
-def get_k_timings_from_inputs_and_kernels(
+def get_n_timings_from_inputs_and_kernels(
     inputs: List[tuple],
     reco_funcs=List[callable],
     input_names=List[str],
     func_names=List[str],
-    k=10,
+    n=10,
 ):
     """
     Args:
@@ -371,7 +371,7 @@ def get_k_timings_from_inputs_and_kernels(
             should return a tuple containing the result and a dictionary of timings.
         input_names (List[str]): A list of names corresponding to the inputs.
         func_names (List[str]): A list of names corresponding to the reconstruction functions.
-        k (int, optional): The number of repetitions to perform for each input and function. Default is 10.
+        n (int, optional): The number of repetitions to perform for each input and function. Default is 10.
     """
 
     assert len(inputs) == len(
@@ -384,7 +384,7 @@ def get_k_timings_from_inputs_and_kernels(
 
     dfs = []
     for i, reco_func in enumerate(reco_funcs):
-        df = get_k_timings_from_inputs(inputs, reco_func, input_names, k=k)
+        df = get_n_timings_from_inputs(inputs, reco_func, input_names, n)
         df["reco_name"] = func_names[i]  # Add function name
 
         dfs.append(df)
