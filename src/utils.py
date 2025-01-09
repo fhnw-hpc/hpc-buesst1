@@ -355,6 +355,44 @@ def get_k_timings_from_kernels(
     return pd.concat(dfs)
 
 
+def get_k_timings_from_inputs_and_kernels(
+    inputs: List[tuple],
+    reco_funcs=List[callable],
+    input_names=List[str],
+    func_names=List[str],
+    k=10,
+):
+    """
+    Args:
+        inputs List(tuple): List of input data for the reconstruction function, typically (u, s, vt, k),
+            where `u` is the left singular matrix, `s` is the singular values,
+            `vt` is the right singular matrix, and `k` is the number of singular components to use.
+        reco_funcs (List[callable]): A list of reconstruction functions to evaluate. Each function
+            should return a tuple containing the result and a dictionary of timings.
+        input_names (List[str]): A list of names corresponding to the inputs.
+        func_names (List[str]): A list of names corresponding to the reconstruction functions.
+        k (int, optional): The number of repetitions to perform for each input and function. Default is 10.
+    """
+
+    assert len(inputs) == len(
+        input_names
+    ), "Each inputs must have a corresponding name."
+
+    assert len(reco_funcs) == len(
+        func_names
+    ), "Each reconstruction function must have a corresponding name."
+
+    dfs = []
+    for i, reco_func in enumerate(reco_funcs):
+        df = get_k_timings_from_inputs(inputs, reco_func, input_names, k=k)
+        df["reco_name"] = func_names[i]  # Add function name
+
+        dfs.append(df)
+
+    # Combine all results into a single DataFrame
+    return pd.concat(dfs)
+
+
 def make_reconstructor(
     kernel: callable,
     block_size: tuple,
