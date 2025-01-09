@@ -270,7 +270,7 @@ def get_n_timings(input: tuple, reco_func: callable, n=10):
         dfs.append(df)
 
     # Combine all repetitions into a single DataFrame
-    return pd.concat(dfs)
+    return pd.concat(dfs, ignore_index=True)
 
 
 def get_n_timings_from_inputs(
@@ -310,7 +310,7 @@ def get_n_timings_from_inputs(
         dfs.append(df)
 
     # Combine all results into a single DataFrame
-    return pd.concat(dfs)
+    return pd.concat(dfs, ignore_index=True)
 
 
 def get_n_timings_from_kernels(
@@ -352,7 +352,7 @@ def get_n_timings_from_kernels(
         dfs.append(df)
 
     # Combine all results into a single DataFrame
-    return pd.concat(dfs)
+    return pd.concat(dfs, ignore_index=True)
 
 
 def get_n_timings_from_inputs_and_kernels(
@@ -390,7 +390,7 @@ def get_n_timings_from_inputs_and_kernels(
         dfs.append(df)
 
     # Combine all results into a single DataFrame
-    return pd.concat(dfs)
+    return pd.concat(dfs, ignore_index=True)
 
 
 def make_reconstructor(
