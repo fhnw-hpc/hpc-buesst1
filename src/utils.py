@@ -118,6 +118,55 @@ def kernels_from_threadcount(thread_count: int):
     return kernels
 
 
+def sparse_out_kernels(kernel_sizes: list, n: int):
+    """
+    Select n kernels from the kernel_sizes list, ensuring symmetry around the middle kernel
+    and skipping kernels on both sides.
+
+    Parameters:
+        kernel_sizes (list of tuples): List of kernel sizes as (rows, cols).
+        n (int): Number of kernels to select (must be odd).
+
+    Returns:
+        list of tuples: Selected kernels.
+    """
+    assert n % 2 > 0, "n must be odd"
+
+    kernel_sizes = sorted(kernel_sizes, key=lambda x: x[0])
+
+    if not len(kernel_sizes) % 2:  # If even number of kernels
+        n_half = (n - 1) // 2
+        middle = len(kernel_sizes) // 2
+        kernel_sizes_right = kernel_sizes[middle:]  # Take right side
+        selected_idx = np.arange(
+            0,
+            len(kernel_sizes_right),
+            int(np.round(len(kernel_sizes_right) / n_half, 0)),
+        )
+        selected_idx = np.hstack(
+            [(middle - (selected_idx + 1))[::-1], middle + selected_idx]
+        )
+        return [kernel_sizes[i] for i in selected_idx]
+
+    else:  # If odd number of kernels
+        n_half = (n - 1) // 2
+        middle = len(kernel_sizes) // 2
+        kernel_sizes_right = kernel_sizes[middle + 1 :]  # Take right side
+        selected_idx = np.arange(
+            0,
+            len(kernel_sizes_right),
+            int(np.round(len(kernel_sizes_right) / n_half, 0)),
+        )
+        selected_idx = np.hstack(
+            [
+                (middle - selected_idx - 1)[::-1],
+                np.array([middle]),
+                middle + 1 + selected_idx,
+            ]
+        )
+        return [kernel_sizes[i] for i in selected_idx]
+
+
 def random_svd(shape):
     """
     Generates random matrices U, S, and V^T for SVD decomposition.
