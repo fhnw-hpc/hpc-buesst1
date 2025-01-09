@@ -4,6 +4,7 @@ from numba import cuda
 import numpy as np
 import pandas as pd
 from typing import List, Union
+from collections import defaultdict
 
 
 class time_region:
@@ -68,7 +69,7 @@ class time_region_cuda:
         )
 
 
-def generate_cuda_kernels(max_size: int):
+def generate_block_sizes(max_size: int):
     """
     Generate all 2D kernel sizes where the product of dimensions is a multiple of 32
     and less than or equal to max_size.
@@ -94,7 +95,7 @@ def generate_cuda_kernels(max_size: int):
     return kernels
 
 
-def kernels_from_threadcount(thread_count: int):
+def block_sizes_from_threadcount(thread_count: int):
     """
     Generate all 2D kernel sizes for a given thread count.
 
@@ -118,10 +119,11 @@ def kernels_from_threadcount(thread_count: int):
     return kernels
 
 
-def sparse_out_kernels(kernel_sizes: list, n: int):
+def sparse_out_block_sizes(kernel_sizes: list, n: int):
     """
-    Select n kernels from the kernel_sizes list, ensuring symmetry around the middle kernel
-    and skipping kernels on both sides.
+    Select n kernels from the kernel_sizes list, ensuring symmetry around the middle kernel,
+    and skipping kernels on both sides. The selection is performed separately for each group of kernels
+    with the same product.
 
     Parameters:
         kernel_sizes (list of tuples): List of kernel sizes as (rows, cols).
@@ -132,39 +134,56 @@ def sparse_out_kernels(kernel_sizes: list, n: int):
     """
     assert n % 2 > 0, "n must be odd"
 
-    kernel_sizes = sorted(kernel_sizes, key=lambda x: x[0])
+    # Group kernels by their product
+    grouped_kernels = defaultdict(list)
+    for kernel in kernel_sizes:
+        product = kernel[0] * kernel[1]
+        grouped_kernels[product].append(kernel)
 
-    if not len(kernel_sizes) % 2:  # If even number of kernels
-        n_half = (n - 1) // 2
-        middle = len(kernel_sizes) // 2
-        kernel_sizes_right = kernel_sizes[middle:]  # Take right side
-        selected_idx = np.arange(
-            0,
-            len(kernel_sizes_right),
-            int(np.round(len(kernel_sizes_right) / n_half, 0)),
-        )
-        selected_idx = np.hstack(
-            [(middle - (selected_idx + 1))[::-1], middle + selected_idx]
-        )
-        return [kernel_sizes[i] for i in selected_idx]
+    selected_kernels = []
 
-    else:  # If odd number of kernels
-        n_half = (n - 1) // 2
-        middle = len(kernel_sizes) // 2
-        kernel_sizes_right = kernel_sizes[middle + 1 :]  # Take right side
-        selected_idx = np.arange(
-            0,
-            len(kernel_sizes_right),
-            int(np.round(len(kernel_sizes_right) / n_half, 0)),
-        )
-        selected_idx = np.hstack(
-            [
-                (middle - selected_idx - 1)[::-1],
-                np.array([middle]),
-                middle + 1 + selected_idx,
-            ]
-        )
-        return [kernel_sizes[i] for i in selected_idx]
+    # Apply the existing selection logic to each group
+    for product, kernels in grouped_kernels.items():
+        kernels = sorted(kernels, key=lambda x: x[0])
+
+        if len(kernels) < n:
+            # If there are fewer kernels than needed, return all of them
+            selected_kernels.extend(kernels)
+            continue
+
+        if not len(kernels) % 2:  # If even number of kernels
+            n_half = (n - 1) // 2
+            middle = len(kernels) // 2
+            kernels_right = kernels[middle:]  # Take right side
+            selected_idx = np.arange(
+                0,
+                len(kernels_right),
+                int(np.round(len(kernels_right) / n_half, 0)),
+            )
+            selected_idx = np.hstack(
+                [(middle - (selected_idx + 1))[::-1], middle + selected_idx]
+            )
+            selected_kernels.extend([kernels[i] for i in selected_idx])
+
+        else:  # If odd number of kernels
+            n_half = (n - 1) // 2
+            middle = len(kernels) // 2
+            kernels_right = kernels[middle + 1 :]  # Take right side
+            selected_idx = np.arange(
+                0,
+                len(kernels_right),
+                int(np.round(len(kernels_right) / n_half, 0)),
+            )
+            selected_idx = np.hstack(
+                [
+                    (middle - selected_idx - 1)[::-1],
+                    np.array([middle]),
+                    middle + 1 + selected_idx,
+                ]
+            )
+            selected_kernels.extend([kernels[i] for i in selected_idx])
+
+    return selected_kernels
 
 
 def random_svd(shape):
@@ -220,6 +239,54 @@ def reconstruct_svd_broadcast_timeit(u, s, vt, k):
     Ouput:
     (m,n) numpy array U_mk * S_k * V^T_nk for k reconstructed components
     """
+
+    with time_region() as total:
+        result = u[:, :k] @ (s[:k].reshape(-1, 1) * vt[:k, :])
+
+    return result, {"total": total.elapsed_time_s()}
+
+
+def reconstruct_svd_broadcast_timeit_fp64(u, s, vt, k):
+    """SVD reconstruction for k components using broadcast
+
+    Inputs:
+    u: (m,n) numpy array
+    s: (n) numpy array (diagonal matrix)
+    vt: (n,n) numpy array
+    k: number of reconstructed singular components
+
+    Ouput:
+    (m,n) numpy array U_mk * S_k * V^T_nk for k reconstructed components
+    """
+
+    # convert to fp64
+    u = u.astype(np.float64)
+    s = s.astype(np.float64)
+    vt = vt.astype(np.float64)
+
+    with time_region() as total:
+        result = u[:, :k] @ (s[:k].reshape(-1, 1) * vt[:k, :])
+
+    return result, {"total": total.elapsed_time_s()}
+
+
+def reconstruct_svd_broadcast_timeit_fp32(u, s, vt, k):
+    """SVD reconstruction for k components using broadcast
+
+    Inputs:
+    u: (m,n) numpy array
+    s: (n) numpy array (diagonal matrix)
+    vt: (n,n) numpy array
+    k: number of reconstructed singular components
+
+    Ouput:
+    (m,n) numpy array U_mk * S_k * V^T_nk for k reconstructed components
+    """
+
+    # convert to fp32
+    u = u.astype(np.float32)
+    s = s.astype(np.float32)
+    vt = vt.astype(np.float32)
 
     with time_region() as total:
         result = u[:, :k] @ (s[:k].reshape(-1, 1) * vt[:k, :])
