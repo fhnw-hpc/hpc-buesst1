@@ -68,6 +68,56 @@ class time_region_cuda:
         )
 
 
+def generate_cuda_kernels(max_size: int):
+    """
+    Generate all 2D kernel sizes where the product of dimensions is a multiple of 32
+    and less than or equal to max_size.
+
+    Parameters:
+        max_size (int): Maximum size for the product of dimensions (must be a multiple of 32).
+
+    Returns:
+        list of tuples: List of kernel sizes as (rows, cols).
+    """
+
+    if max_size % 32 != 0:
+        raise ValueError("max_size must be a multiple of 32.")
+
+    kernels = []
+
+    for product in range(32, max_size + 1, 32):  # Iterate over multiples of 32
+        for rows in range(1, product + 1):  # Rows from 1 to the product
+            if product % rows == 0:  # Ensure rows divides the product evenly
+                cols = product // rows  # Calculate the corresponding columns
+                kernels.append((rows, cols))  # Add the kernel size as a tuple
+
+    return kernels
+
+
+def kernels_from_threadcount(thread_count: int):
+    """
+    Generate all 2D kernel sizes for a given thread count.
+
+    Parameters:
+        thread_count (int): Number of threads (must be a multiple of 32).
+
+    Returns:
+        list of tuples: List of kernel sizes as (rows, cols).
+    """
+
+    if thread_count % 32 != 0:
+        raise ValueError("thread_count must be a multiple of 32.")
+
+    kernels = []
+
+    for rows in range(1, thread_count + 1):  # Rows from 1 to thread_count
+        if thread_count % rows == 0:  # Ensure rows divides thread_count evenly
+            cols = thread_count // rows  # Calculate the corresponding columns
+            kernels.append((rows, cols))  # Add the kernel size as a tuple
+
+    return kernels
+
+
 def random_svd(shape):
     """
     Generates random matrices U, S, and V^T for SVD decomposition.
