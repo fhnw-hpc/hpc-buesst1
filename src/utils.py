@@ -273,6 +273,46 @@ def get_k_timings(input: tuple, reco_func: callable, k=10):
     return pd.concat(dfs)
 
 
+def get_k_timings_from_inputs(
+    inputs: List[tuple], reco_func: callable, names=List[str], k=10
+):
+    """
+    Executes multiple reconstructions from different inputs repeatedly and collects timing information.
+
+    Args:
+        inputs List(tuple): List of input data for the reconstruction function, typically (u, s, vt, k),
+            where `u` is the left singular matrix, `s` is the singular values,
+            `vt` is the right singular matrix, and `k` is the number of singular components to use.
+        reco_func (callable): The reconstruction function to evaluate. This function should return
+            a tuple containing the result and a dictionary of timings.
+        names (List[str]): A list of names corresponding to the inputs.
+        k (int, optional): The number of repetitions to perform for each input. Default is 10.
+
+    Returns:
+        pd.DataFrame: A DataFrame containing the timing information from all inputs and repetitions,
+        with additional columns indicating the input name and the repetition index.
+
+    Raises:
+        AssertionError: If the number of inputs does not match the number of names.
+    """
+
+    assert len(inputs) == len(names), "Each inputs must have a corresponding name."
+
+    dfs = []
+    for i in range(len(inputs)):
+        input = inputs[i]
+        name = names[i]
+
+        # Get timings for the current input
+        df = get_k_timings(input, reco_func, k)
+        df["input_name"] = name  # Add input name
+
+        dfs.append(df)
+
+    # Combine all results into a single DataFrame
+    return pd.concat(dfs)
+
+
 def get_k_timings_from_kernels(
     input: tuple, reco_funcs=List[callable], names=List[str], k=10
 ):
@@ -307,7 +347,7 @@ def get_k_timings_from_kernels(
 
         # Get timings for the current reconstruction function
         df = get_k_timings(input, reco_func, k)
-        df["name"] = name  # Add function name
+        df["reco_name"] = name  # Add function name
 
         dfs.append(df)
 
@@ -571,9 +611,15 @@ def make_reconstructor(
                 # here in steams also the input arrays must be pinned to use the DMA engines (Direct Memory Access)
                 if pin_memory:
                     # create pinned array
-                    u_i = cuda.pinned_array(u_list[i].shape, dtype=u_dtype, order=u_order)
-                    s_i = cuda.pinned_array(s_list[i].shape, dtype=s_dtype, order=s_order)
-                    vt_i = cuda.pinned_array(vt_list[i].shape, dtype=vt_dtype, order=vt_order)
+                    u_i = cuda.pinned_array(
+                        u_list[i].shape, dtype=u_dtype, order=u_order
+                    )
+                    s_i = cuda.pinned_array(
+                        s_list[i].shape, dtype=s_dtype, order=s_order
+                    )
+                    vt_i = cuda.pinned_array(
+                        vt_list[i].shape, dtype=vt_dtype, order=vt_order
+                    )
 
                     # copy data to pinned array
                     np.copyto(u_i, u_list[i])
