@@ -2,8 +2,8 @@ from numba import cuda, float32, float64
 
 # RTX4090 has 128kB of shared memory which results in a max capacity of:
 
-TILE_SIZE_FP64 = 256
-TILE_SIZE_FP32 = 512
+TILE_SIZE_FP64 = 128
+TILE_SIZE_FP32 = 256
 
 
 @cuda.jit(
