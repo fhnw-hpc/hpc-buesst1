@@ -2,28 +2,20 @@ from src.utils import (
     make_reconstructor,
     reconstruct_svd_broadcast,
     compare_matrices,
-    reconstruct_svd_broadcast_timeit,
-    compare_kernels,
     random_svd,
-    get_timings,
-    get_k_timings,
-    get_k_timings_from_kernels,
 )
 from src.kernels.global_mem import fp32 as kernel_globalmem_fp32
 from src.kernels.global_mem import fp64 as kernel_globalmem_fp64
 from src.kernels.shared_mem import fp32 as kernel_sharedmem_fp32
 from src.kernels.shared_mem import fp64 as kernel_sharedmem_fp64
-from src.kernels.shared_mem import TILE_SIZE
 
-RECO_SHAPE = (256, 342) #  (768, 1024) -> if kernel size is too big the kernels are run in series
+RECO_SHAPE = (
+    256,
+    342,
+)  #  (768, 1024) -> if kernel size is too big the kernels are run in series
 BLOCK_SIZE = (8, 16)
 PIN_MEMORY = True
 NUM_STREAMS = 50
-
-# because of tiling -> num threads must be >= tile size because otherwise not all elements will be loaded
-assert (
-    BLOCK_SIZE[0] * BLOCK_SIZE[1] >= TILE_SIZE
-), "number of threads must be bigger than tile size"
 
 if __name__ == "__main__":
     input = random_svd(RECO_SHAPE)
@@ -55,7 +47,12 @@ if __name__ == "__main__":
         [
             compare_matrices(result, ref)
             for result in reco_func(
-                *([input[0]] * NUM_STREAMS, [input[1]] * NUM_STREAMS, [input[2]] * NUM_STREAMS, [input[3]] * NUM_STREAMS)
+                *(
+                    [input[0]] * NUM_STREAMS,
+                    [input[1]] * NUM_STREAMS,
+                    [input[2]] * NUM_STREAMS,
+                    [input[3]] * NUM_STREAMS,
+                )
             )
         ],
     )
@@ -72,7 +69,12 @@ if __name__ == "__main__":
         [
             compare_matrices(result, ref)
             for result in reco_func(
-                *([input[0]] * NUM_STREAMS, [input[1]] * NUM_STREAMS, [input[2]] * NUM_STREAMS, [input[3]] * NUM_STREAMS)
+                *(
+                    [input[0]] * NUM_STREAMS,
+                    [input[1]] * NUM_STREAMS,
+                    [input[2]] * NUM_STREAMS,
+                    [input[3]] * NUM_STREAMS,
+                )
             )
         ],
     )

@@ -1,6 +1,9 @@
 from numba import cuda, float32, float64
 
-TILE_SIZE = 32
+# RTX4090 has 128kB of shared memory which results in a max capacity of:
+
+TILE_SIZE_FP64 = 256
+TILE_SIZE_FP32 = 512
 
 
 @cuda.jit(
@@ -21,33 +24,37 @@ def fp64(u, s, vt, k, y):
     col, row = cuda.grid(2)
 
     # init shared array
-    s_s = cuda.shared.array(shape=TILE_SIZE, dtype=float64)
+    s_s = cuda.shared.array(shape=TILE_SIZE_FP64, dtype=float64)
 
     # calculate number of min tiles required
-    num_tiles = (k + TILE_SIZE - 1) // TILE_SIZE
+    num_tiles = (k + TILE_SIZE_FP64 - 1) // TILE_SIZE_FP64
 
     # calculate thread id within block
     threadID = cuda.threadIdx.x + cuda.blockDim.x * cuda.threadIdx.y
+
+    # calculate stride
+    stride = cuda.blockDim.x * cuda.blockDim.y
 
     # element of final matrix will be stored here
     element = float64(0)
 
     # iterate over tiles
     for tile_nr in range(num_tiles):
-        # only copy if threadID is smaller than TILE_SIZE
-        if threadID < TILE_SIZE:
-            idx = tile_nr * TILE_SIZE + threadID
-            if idx < k:
-                s_s[threadID] = s[idx]
+        # load elements into shared memory
+        start = tile_nr * TILE_SIZE_FP64
+        for i in range(threadID, TILE_SIZE_FP64, stride):
+            global_idx = start + i
+            if global_idx < k:
+                s_s[i] = s[global_idx]
             else:
-                s_s[threadID] = float64(0)
+                s_s[i] = 0.0
 
         # wait for all threads to finish the copy process
         cuda.syncthreads()
 
         # loop over tile
-        for p in range(TILE_SIZE):
-            idx = tile_nr * TILE_SIZE + p
+        for p in range(TILE_SIZE_FP64):
+            idx = tile_nr * TILE_SIZE_FP64 + p
             if idx < k:
                 element += u[row, idx] * s_s[p] * vt[idx, col]
 
@@ -73,40 +80,46 @@ def fp32(u, s, vt, k, y):
     k int: number of reconstructed singular components
     y (m,n): output array
     """
+
     # col = x-dimension, row = y-dimension
     col, row = cuda.grid(2)
 
     # init shared array
-    s_s = cuda.shared.array(shape=TILE_SIZE, dtype=float32)
+    s_s = cuda.shared.array(shape=TILE_SIZE_FP32, dtype=float32)
 
     # calculate number of min tiles required
-    num_tiles = (k + TILE_SIZE - 1) // TILE_SIZE
+    num_tiles = (k + TILE_SIZE_FP32 - 1) // TILE_SIZE_FP32
 
     # calculate thread id within block
     threadID = cuda.threadIdx.x + cuda.blockDim.x * cuda.threadIdx.y
+
+    # calculate stride
+    stride = cuda.blockDim.x * cuda.blockDim.y
 
     # element of final matrix will be stored here
     element = float32(0)
 
     # iterate over tiles
     for tile_nr in range(num_tiles):
-        # only copy if threadID is smaller than TILE_SIZE
-        if threadID < TILE_SIZE:
-            idx = tile_nr * TILE_SIZE + threadID
-            if idx < k:
-                s_s[threadID] = s[idx]
+        # load elements into shared memory
+        start = tile_nr * TILE_SIZE_FP32
+        for i in range(threadID, TILE_SIZE_FP32, stride):
+            global_idx = start + i
+            if global_idx < k:
+                s_s[i] = s[global_idx]
             else:
-                s_s[threadID] = float32(0)
+                s_s[i] = 0.0
 
         # wait for all threads to finish the copy process
         cuda.syncthreads()
 
         # loop over tile
-        for p in range(TILE_SIZE):
-            idx = tile_nr * TILE_SIZE + p
+        for p in range(TILE_SIZE_FP32):
+            idx = tile_nr * TILE_SIZE_FP32 + p
             if idx < k:
                 element += u[row, idx] * s_s[p] * vt[idx, col]
 
+        # wait for all threads to finish
         cuda.syncthreads()
 
     # only write to global memory if indices are in range
