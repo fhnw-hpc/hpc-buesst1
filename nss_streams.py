@@ -47,6 +47,11 @@ if __name__ == "__main__":
 
     time.sleep(1)
 
+    print(f"reco of {NUM_STREAMS} big images started (pageable memory)")
+    reco_func_pageable(*input_big)
+
+    time.sleep(1)
+
     print(f"reco of {NUM_STREAMS} small images started (pinned memory)")
     reco_func_pinned(*input_small)
 

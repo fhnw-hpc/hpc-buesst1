@@ -809,6 +809,12 @@ def make_reconstructor(
 
         # Transfer, launch, copy back in each stream
         for i in range(n_jobs):
+            # create gpu output
+            m, n = u_list[i].shape[0], vt_list[i].shape[1]
+            y_gpu = cuda.device_array(
+                (m, n), dtype=y_dtype, order=y_order, stream=streams[i]
+            )
+
             # here in steams also the input arrays must be pinned to use the DMA engines (Direct Memory Access)
             if pin_memory:
                 # create pinned array
@@ -817,6 +823,7 @@ def make_reconstructor(
                 vt_i = cuda.pinned_array(
                     vt_list[i].shape, dtype=vt_dtype, order=vt_order
                 )
+                y_host = cuda.pinned_array_like(y_gpu)
 
                 # copy data to pinned array
                 np.copyto(u_i, u_list[i])
@@ -828,6 +835,7 @@ def make_reconstructor(
                 u_i = np.array(u_list[i], dtype=u_dtype, order=u_order)
                 s_i = np.array(s_list[i], dtype=s_dtype, order=s_order)
                 vt_i = np.array(vt_list[i], dtype=vt_dtype, order=vt_order)
+                y_host = np.empty((m, n), dtype=y_dtype, order=y_order)
 
             k_i = getattr(np, k_dtype)(k_list[i])
 
@@ -835,28 +843,17 @@ def make_reconstructor(
             s_gpu = cuda.to_device(s_i, stream=streams[i])
             vt_gpu = cuda.to_device(vt_i, stream=streams[i])
 
-            m, n = u_i.shape[0], vt_i.shape[1]
-            y_gpu = cuda.device_array(
-                (m, n), dtype=y_dtype, order=y_order, stream=streams[i]
-            )
-
             num_rows, num_columns = block_size
             blocks_per_grid_x = (n + num_columns - 1) // num_columns
             blocks_per_grid_y = (m + num_rows - 1) // num_rows
             blocks_per_grid = (blocks_per_grid_x, blocks_per_grid_y)
 
+            # execute kernel
             kernel[
                 blocks_per_grid,
                 (num_columns, num_rows),
                 streams[i],
             ](u_gpu, s_gpu, vt_gpu, k_i, y_gpu)
-
-            # allocate memory on host and pin if requrested
-            if pin_memory:
-                y_host = cuda.pinned_array_like(y_gpu)
-            else:
-                # Ensure correct shape/order
-                y_host = np.empty((m, n), dtype=y_dtype, order=y_order)
 
             # Copy result back to host
             y_gpu.copy_to_host(y_host, stream=streams[i])
