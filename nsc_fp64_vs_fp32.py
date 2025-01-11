@@ -8,7 +8,7 @@ from src.utils import (
 from src.kernels.global_mem import fp32 as kernel_globalmem_fp32
 from src.kernels.global_mem import fp64 as kernel_globalmem_fp64
 
-INPUT_SIZE = (3072, 4096)  # medium matrix size
+INPUT_SIZE = (1080, 1920)  # small matrix size (bigger crashes my GPU)
 BlOCK_SIZE = (8, 16)  # ideal block size
 
 if __name__ == "__main__":
