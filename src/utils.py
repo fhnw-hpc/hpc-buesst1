@@ -780,88 +780,95 @@ def make_reconstructor(
             List[np.ndarray]: A list of reconstructed matrices, one per input triplet.
         """
 
-        assert (
-            len(u_list) == len(s_list) == len(vt_list)
-        ), "Input lists must have the same length."
+        # stop numba from cleanup
+        with cuda.defer_cleanup():
 
-        n_jobs = len(u_list)
-
-        # Normalize k to a list
-        if isinstance(k, int):
-            k_list = [k] * n_jobs
-        else:
-            k_list = k
             assert (
-                len(k_list) == n_jobs
-            ), "If k is a list, it must match the number of jobs."
+                len(u_list) == len(s_list) == len(vt_list)
+            ), "Input lists must have the same length."
 
-        # Kernel signature
-        types_and_orders = infer_types_and_orders(kernel)
-        u_dtype, u_order = types_and_orders[0]
-        s_dtype, s_order = types_and_orders[1]
-        vt_dtype, vt_order = types_and_orders[2]
-        k_dtype, _ = types_and_orders[3]
-        y_dtype, y_order = types_and_orders[4]
+            n_jobs = len(u_list)
 
-        # Create streams
-        streams = [cuda.stream() for _ in range(n_jobs)]
-        results = [None] * n_jobs
-
-        # Transfer, launch, copy back in each stream
-        for i in range(n_jobs):
-            # create gpu output
-            m, n = u_list[i].shape[0], vt_list[i].shape[1]
-            y_gpu = cuda.device_array(
-                (m, n), dtype=y_dtype, order=y_order, stream=streams[i]
-            )
-
-            # here in steams also the input arrays must be pinned to use the DMA engines (Direct Memory Access)
-            if pin_memory:
-                # create pinned array
-                u_i = cuda.pinned_array(u_list[i].shape, dtype=u_dtype, order=u_order)
-                s_i = cuda.pinned_array(s_list[i].shape, dtype=s_dtype, order=s_order)
-                vt_i = cuda.pinned_array(
-                    vt_list[i].shape, dtype=vt_dtype, order=vt_order
-                )
-                y_host = cuda.pinned_array_like(y_gpu)
-
-                # copy data to pinned array
-                np.copyto(u_i, u_list[i])
-                np.copyto(s_i, s_list[i])
-                np.copyto(vt_i, vt_list[i])
-
+            # Normalize k to a list
+            if isinstance(k, int):
+                k_list = [k] * n_jobs
             else:
+                k_list = k
+                assert (
+                    len(k_list) == n_jobs
+                ), "If k is a list, it must match the number of jobs."
 
-                u_i = np.array(u_list[i], dtype=u_dtype, order=u_order)
-                s_i = np.array(s_list[i], dtype=s_dtype, order=s_order)
-                vt_i = np.array(vt_list[i], dtype=vt_dtype, order=vt_order)
-                y_host = np.empty((m, n), dtype=y_dtype, order=y_order)
+            # Kernel signature
+            types_and_orders = infer_types_and_orders(kernel)
+            u_dtype, u_order = types_and_orders[0]
+            s_dtype, s_order = types_and_orders[1]
+            vt_dtype, vt_order = types_and_orders[2]
+            k_dtype, _ = types_and_orders[3]
+            y_dtype, y_order = types_and_orders[4]
 
-            k_i = getattr(np, k_dtype)(k_list[i])
+            # Create streams
+            streams = [cuda.stream() for _ in range(n_jobs)]
+            results = [None] * n_jobs
 
-            u_gpu = cuda.to_device(u_i, stream=streams[i])
-            s_gpu = cuda.to_device(s_i, stream=streams[i])
-            vt_gpu = cuda.to_device(vt_i, stream=streams[i])
+            # Transfer, launch, copy back in each stream
+            for i in range(n_jobs):
+                # create gpu output
+                m, n = u_list[i].shape[0], vt_list[i].shape[1]
+                y_gpu = cuda.device_array(
+                    (m, n), dtype=y_dtype, order=y_order, stream=streams[i]
+                )
 
-            num_rows, num_columns = block_size
-            blocks_per_grid_x = (n + num_columns - 1) // num_columns
-            blocks_per_grid_y = (m + num_rows - 1) // num_rows
-            blocks_per_grid = (blocks_per_grid_x, blocks_per_grid_y)
+                # here in steams also the input arrays must be pinned to use the DMA engines (Direct Memory Access)
+                if pin_memory:
+                    # create pinned array
+                    u_i = cuda.pinned_array(
+                        u_list[i].shape, dtype=u_dtype, order=u_order
+                    )
+                    s_i = cuda.pinned_array(
+                        s_list[i].shape, dtype=s_dtype, order=s_order
+                    )
+                    vt_i = cuda.pinned_array(
+                        vt_list[i].shape, dtype=vt_dtype, order=vt_order
+                    )
+                    y_host = cuda.pinned_array_like(y_gpu)
 
-            # execute kernel
-            kernel[
-                blocks_per_grid,
-                (num_columns, num_rows),
-                streams[i],
-            ](u_gpu, s_gpu, vt_gpu, k_i, y_gpu)
+                    # copy data to pinned array
+                    np.copyto(u_i, u_list[i])
+                    np.copyto(s_i, s_list[i])
+                    np.copyto(vt_i, vt_list[i])
 
-            # Copy result back to host
-            y_gpu.copy_to_host(y_host, stream=streams[i])
-            results[i] = y_host
+                else:
 
-        # Synchronize
-        for i in range(n_jobs):
-            streams[i].synchronize()
+                    u_i = np.array(u_list[i], dtype=u_dtype, order=u_order)
+                    s_i = np.array(s_list[i], dtype=s_dtype, order=s_order)
+                    vt_i = np.array(vt_list[i], dtype=vt_dtype, order=vt_order)
+                    y_host = np.empty((m, n), dtype=y_dtype, order=y_order)
+
+                k_i = getattr(np, k_dtype)(k_list[i])
+
+                u_gpu = cuda.to_device(u_i, stream=streams[i])
+                s_gpu = cuda.to_device(s_i, stream=streams[i])
+                vt_gpu = cuda.to_device(vt_i, stream=streams[i])
+
+                num_rows, num_columns = block_size
+                blocks_per_grid_x = (n + num_columns - 1) // num_columns
+                blocks_per_grid_y = (m + num_rows - 1) // num_rows
+                blocks_per_grid = (blocks_per_grid_x, blocks_per_grid_y)
+
+                # execute kernel
+                kernel[
+                    blocks_per_grid,
+                    (num_columns, num_rows),
+                    streams[i],
+                ](u_gpu, s_gpu, vt_gpu, k_i, y_gpu)
+
+                # Copy result back to host
+                y_gpu.copy_to_host(y_host, stream=streams[i])
+                results[i] = y_host
+
+            # Synchronize
+            for i in range(n_jobs):
+                streams[i].synchronize()
 
         return results
 

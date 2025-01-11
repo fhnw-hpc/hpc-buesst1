@@ -32,6 +32,11 @@ if __name__ == "__main__":
         [input_big[3]] * NUM_STREAMS,
     )
 
+    # serial reconstruction function
+    reco_func_serial = make_reconstructor(
+        kernel_sharedmem_fp32, BLOCK_SIZE, pin_memory=False, use_streams=False
+    )
+
     # reconstruction function with pageable memory
     reco_func_pageable = make_reconstructor(
         kernel_sharedmem_fp32, BLOCK_SIZE, pin_memory=False, use_streams=True
@@ -41,6 +46,26 @@ if __name__ == "__main__":
     reco_func_pinned = make_reconstructor(
         kernel_sharedmem_fp32, BLOCK_SIZE, pin_memory=True, use_streams=True
     )
+
+    print(f"reco of {NUM_STREAMS} small images started (serially)")
+    [
+        reco_func_serial(
+            input_small[0][i], input_small[1][i], input_small[2][i], input_small[3][i]
+        )
+        for i in range(len(input_small[0]))
+    ]
+
+    time.sleep(1)
+
+    print(f"reco of {NUM_STREAMS} big images started (serially)")
+    [
+        reco_func_serial(
+            input_big[0][i], input_big[1][i], input_big[2][i], input_big[3][i]
+        )
+        for i in range(len(input_big[0]))
+    ]
+
+    time.sleep(1)
 
     print(f"reco of {NUM_STREAMS} small images started (pageable memory)")
     reco_func_pageable(*input_small)
