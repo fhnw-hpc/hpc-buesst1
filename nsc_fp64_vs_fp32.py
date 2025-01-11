@@ -10,7 +10,8 @@ from src.kernels.global_mem import fp64 as kernel_globalmem_fp64
 from src.kernels.global_mem import fp64_fma as kernel_globalmem_fp64_fma
 
 INPUT_SIZE = (1080, 1920)  # small matrix size (bigger crashes my GPU)
-BlOCK_SIZE = (8, 16)  # ideal block size
+BlOCK_SIZE1 = (8, 16)  # ideal block size
+BlOCK_SIZE2 = (4, 32)  # ideal block size (for coalescing)
 
 if __name__ == "__main__":
     # Dieses experiment soll fp64 mit fp32 vergleichen. Dazu werden die kernel mit nsight compute profiled.
@@ -23,9 +24,10 @@ if __name__ == "__main__":
     ref = reconstruct_svd_broadcast(*input)
 
     # create reco functions
-    reco_fp64 = make_reconstructor(kernel_globalmem_fp64, BlOCK_SIZE)
-    reco_fp32 = make_reconstructor(kernel_globalmem_fp32, BlOCK_SIZE)
-    reco_fp64_fma = make_reconstructor(kernel_globalmem_fp64_fma, BlOCK_SIZE)
+    reco_fp64 = make_reconstructor(kernel_globalmem_fp64, BlOCK_SIZE1)
+    reco_fp32 = make_reconstructor(kernel_globalmem_fp32, BlOCK_SIZE1)
+    reco_fp64_fma = make_reconstructor(kernel_globalmem_fp64_fma, BlOCK_SIZE1)
+    reco_fp32_coalescing = make_reconstructor(kernel_globalmem_fp32, BlOCK_SIZE2)
 
     # reconstruct
     print("reco fp64 (non fma) started")
@@ -36,3 +38,6 @@ if __name__ == "__main__":
 
     print("reco fp64 (fma) started")
     print("result precise: ", compare_matrices(ref, reco_fp64_fma(*input)))
+
+    print("reco fp32 (more ideal coalescing) started")
+    print("result precise: ", compare_matrices(ref, reco_fp32_coalescing(*input)))
