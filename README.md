@@ -4,7 +4,7 @@ In this Mini Challenge 2, we will be programming, parallelizing, accelerating, a
 
 [Use GitHub Classroom to work on this mini challenge](https://classroom.github.com/a/qRHs6yk5)
 
-### Remarks
+### Remarks 
 * The Mini Challenge is divided into 2 parts:
   * Part 1: Optimize CPU implementation
   * Part 2: Create and optimize GPU implementation
